@@ -25,12 +25,16 @@ export class GeminiWorker {
     // 2. Start fresh chat (using Temporary Chat mode if configured)
     await GeminiPage.startFreshChat(page, this.config.useTemporaryChat);
 
-    // 3. Submit full normalized prompt
-    await GeminiPage.submitPrompt(page, task.prompt);
+    // 3. Submit full normalized prompt and capture response tracking state
+    const initialResponseCount = await GeminiPage.submitPrompt(
+      page,
+      task.prompt
+    );
 
     // 4. Wait for Gemini Web generation to complete and extract text
     const text = await GeminiPage.waitForCompletionAndExtract(
       page,
+      initialResponseCount,
       this.config.generationTimeoutMs
     );
 

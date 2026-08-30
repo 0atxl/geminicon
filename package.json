@@ -1,5 +1,5 @@
 {
-  "name": "gemini-web-gateway",
+  "name": "geminicon",
   "version": "1.0.0",
   "description": "Minimal local OpenAI-compatible gateway for Gemini Web",
   "type": "module",

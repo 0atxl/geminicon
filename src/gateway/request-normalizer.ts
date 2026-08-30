@@ -3,7 +3,7 @@ import { GatewayError } from "./errors.js";
 
 export class RequestNormalizer {
   /**
-   * Normalizes an array of OpenAI messages into a single prompt for Gemini Web.
+   * Normalizes an array of OpenAI messages into a single prompt string for Gemini Web.
    */
   public static normalize(messages: OpenAIMessage[]): string {
     if (!messages || !Array.isArray(messages) || messages.length === 0) {
@@ -16,9 +16,15 @@ export class RequestNormalizer {
     const nonSystemMessages: OpenAIMessage[] = [];
 
     for (const msg of messages) {
-      if (!msg || typeof msg.content !== "string") {
+      if (!msg || typeof msg !== "object") {
         throw GatewayError.invalidRequest(
-          "Invalid message: 'content' must be a string."
+          "Invalid message: each item in 'messages' must be an object."
+        );
+      }
+
+      if (typeof msg.content !== "string") {
+        throw GatewayError.invalidRequest(
+          "Invalid message: 'content' must be a plain string. Multimodal content is not supported in V1."
         );
       }
 
@@ -57,7 +63,7 @@ export class RequestNormalizer {
     // Case 3: Multi-turn conversation
     const conversationTurns = nonSystemMessages.map((m) => {
       const roleLabel = m.role === "assistant" ? "ASSISTANT" : "USER";
-      return `${roleLabel}:\n${m.content}`;
+      return `${roleLabel}\n\n${m.content}`;
     });
 
     const conversationText = conversationTurns.join("\n\n");

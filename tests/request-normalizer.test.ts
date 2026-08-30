@@ -28,7 +28,7 @@ describe("RequestNormalizer", () => {
     ];
     const result = RequestNormalizer.normalize(messages);
     expect(result).toBe(
-      "USER:\nMy name is Alex.\n\nASSISTANT:\nHello Alex! How can I help you today?\n\nUSER:\nWhat is my name?"
+      "USER\n\nMy name is Alex.\n\nASSISTANT\n\nHello Alex! How can I help you today?\n\nUSER\n\nWhat is my name?"
     );
   });
 
@@ -41,7 +41,7 @@ describe("RequestNormalizer", () => {
     ];
     const result = RequestNormalizer.normalize(messages);
     expect(result).toBe(
-      "SYSTEM INSTRUCTIONS\n\nYou are a concise tutor.\n\nUSER:\nWhat is 2+2?\n\nASSISTANT:\n4\n\nUSER:\nMultiply that by 10"
+      "SYSTEM INSTRUCTIONS\n\nYou are a concise tutor.\n\nUSER\n\nWhat is 2+2?\n\nASSISTANT\n\n4\n\nUSER\n\nMultiply that by 10"
     );
   });
 
@@ -64,6 +64,22 @@ describe("RequestNormalizer", () => {
   it("should throw GatewayError.invalidRequest if messages contain only system instructions", () => {
     expect(() =>
       RequestNormalizer.normalize([{ role: "system", content: "Instruction only" }])
+    ).toThrow(GatewayError);
+  });
+
+  it("should throw GatewayError.invalidRequest if invalid role is passed", () => {
+    expect(() =>
+      RequestNormalizer.normalize([
+        { role: "invalid_role" as any, content: "Hello" },
+      ])
+    ).toThrow(GatewayError);
+  });
+
+  it("should throw GatewayError.invalidRequest if multimodal content object is passed", () => {
+    expect(() =>
+      RequestNormalizer.normalize([
+        { role: "user", content: [{ type: "text", text: "hi" }] as any },
+      ])
     ).toThrow(GatewayError);
   });
 });

@@ -10,23 +10,26 @@ export const registerHealthRoute = (
       const health = await browserManager.checkHealth();
 
       let statusCode = 200;
-      let overallStatus: HealthStatus["status"] = "ok";
+      let overallStatus: "ok" | "degraded" | "error" = "ok";
 
       if (health.browser === "unavailable") {
         overallStatus = "error";
         statusCode = 503;
-      } else if (health.gemini === "authentication_required") {
+      } else if (
+        health.gemini === "authentication_required" ||
+        health.gemini === "unavailable"
+      ) {
         overallStatus = "degraded";
         statusCode = 503;
       }
 
-      const response: HealthStatus = {
+      const payload: HealthStatus = {
         status: overallStatus,
         browser: health.browser,
-        ...(health.gemini ? { gemini: health.gemini } : {}),
+        gemini: health.gemini,
       };
 
-      return reply.code(statusCode).send(response);
+      return reply.code(statusCode).send(payload);
     });
   };
 };

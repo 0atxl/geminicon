@@ -15,7 +15,7 @@ export async function createServer(): Promise<{
 }> {
   const app = Fastify({
     logger: {
-      level: process.env.LOG_LEVEL || "info",
+      level: config.logLevel,
     },
   });
 
@@ -59,7 +59,10 @@ export async function createServer(): Promise<{
   // Initialize Provider & Queue
   const browserManager = new BrowserManager(config);
   const worker = new GeminiWorker(browserManager, config);
-  const taskQueue = new TaskQueue((task) => worker.execute(task), config.queueMaxSize);
+  const taskQueue = new TaskQueue(
+    (task) => worker.execute(task),
+    config.queueMaxSize
+  );
 
   // Register API Routes
   await app.register(registerChatCompletionsRoute(taskQueue));
@@ -97,19 +100,19 @@ async function main() {
 
     // Initialize Browser
     let browserStatus = "unavailable";
-    let geminiStatus = "unavailable";
+    let geminiStatus = "unknown";
 
     try {
       await browserManager.launch();
       const health = await browserManager.checkHealth();
       browserStatus = health.browser;
-      geminiStatus = health.gemini;
+      geminiStatus = health.gemini || "unknown";
     } catch (err: any) {
       app.log.warn(`Browser initialization deferred: ${err.message}`);
     }
 
     console.log(`\n==================================`);
-    console.log(`Gemini Web Gateway (Minimal V1)`);
+    console.log(`geminicon (Minimal V1)`);
     console.log(`==================================`);
     console.log(`HTTP:     http://${config.host}:${config.port}`);
     console.log(`Browser:  ${browserStatus}`);

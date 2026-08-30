@@ -6,6 +6,7 @@ import { GatewayError } from "../gateway/errors.js";
 import { RequestNormalizer } from "../gateway/request-normalizer.js";
 import { ResponseNormalizer } from "../gateway/response-normalizer.js";
 import { TaskQueue } from "../queue/task-queue.js";
+import { config } from "../config.js";
 
 const chatCompletionSchema = z.object({
   model: z.string({
@@ -20,7 +21,8 @@ const chatCompletionSchema = z.object({
           }),
         }),
         content: z.string({
-          required_error: "Message 'content' must be a string.",
+          required_error: "Message 'content' must be a plain string.",
+          invalid_type_error: "Message 'content' must be a plain string. Multimodal formats are not supported in V1.",
         }),
         name: z.string().optional(),
       }),
@@ -40,6 +42,9 @@ export const registerChatCompletionsRoute = (
 ): FastifyPluginAsync => {
   return async (fastify) => {
     fastify.post("/v1/chat/completions", async (request, reply) => {
+      const startTime = Date.now();
+      const requestId = `req_${crypto.randomBytes(6).toString("hex")}`;
+
       // 1. Validate request body against schema
       const parseResult = chatCompletionSchema.safeParse(request.body);
       if (!parseResult.success) {
@@ -56,10 +61,11 @@ export const registerChatCompletionsRoute = (
         throw GatewayError.unsupportedModel(body.model);
       }
 
-      // 3. Validate stream option
+      // 3. Validate stream option (must explicitly reject with streaming_not_supported)
       if (body.stream === true) {
         throw GatewayError.unsupportedFeature(
-          "Streaming is not supported in V1."
+          "Streaming is not supported in V1.",
+          "streaming_not_supported"
         );
       }
 
@@ -69,16 +75,33 @@ export const registerChatCompletionsRoute = (
       );
 
       // 5. Create internal task
-      const taskId = `req_${crypto.randomBytes(6).toString("hex")}`;
       const task: GatewayTask = {
-        id: taskId,
+        id: requestId,
         model: "gemini-web",
         prompt,
-        createdAt: Date.now(),
+        createdAt: startTime,
       };
+
+      if (config.logContent) {
+        fastify.log.info({ requestId, prompt }, "Submitting prompt to queue");
+      } else {
+        fastify.log.info({ requestId }, "Request queued");
+      }
 
       // 6. Enqueue task for sequential execution
       const workerResult = await taskQueue.enqueue(task);
+
+      if (config.logContent) {
+        fastify.log.info(
+          { requestId, latencyMs: workerResult.latencyMs, response: workerResult.text },
+          "Generation completed"
+        );
+      } else {
+        fastify.log.info(
+          { requestId, latencyMs: workerResult.latencyMs },
+          "Generation completed"
+        );
+      }
 
       // 7. Format OpenAI-compatible response
       const response = ResponseNormalizer.normalize(workerResult);

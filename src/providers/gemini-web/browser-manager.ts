@@ -1,6 +1,5 @@
 import { chromium, BrowserContext, Page } from "playwright";
 import fs from "fs";
-import path from "path";
 import { GatewayConfig } from "../../config.js";
 import { BrowserHealthStatus } from "./types.js";
 import { GeminiPage } from "./gemini-page.js";
@@ -17,7 +16,7 @@ export class BrowserManager {
   }
 
   /**
-   * Initializes the persistent browser context and main page.
+   * Initializes the persistent browser context and main page using standard Playwright defaults.
    */
   public async launch(): Promise<void> {
     if (this.context && this.page && !this.page.isClosed()) {
@@ -25,7 +24,6 @@ export class BrowserManager {
     }
 
     if (this.isLaunching) {
-      // Wait for concurrent launch to complete
       while (this.isLaunching) {
         await new Promise((r) => setTimeout(r, 100));
       }
@@ -35,7 +33,6 @@ export class BrowserManager {
     this.isLaunching = true;
 
     try {
-      // Ensure profile directory exists
       if (!fs.existsSync(this.config.browserProfilePath)) {
         fs.mkdirSync(this.config.browserProfilePath, { recursive: true });
       }
@@ -45,11 +42,6 @@ export class BrowserManager {
         {
           headless: this.config.headless,
           viewport: { width: 1280, height: 800 },
-          args: [
-            "--disable-blink-features=AutomationControlled",
-            "--no-sandbox",
-            "--disable-setuid-sandbox",
-          ],
         }
       );
 
@@ -95,19 +87,35 @@ export class BrowserManager {
   }
 
   /**
-   * Checks the health of the browser and Gemini authentication.
+   * Positively checks the health of the browser and Gemini Web readiness.
+   * Ensures about:blank is not reported as ready.
    */
   public async checkHealth(): Promise<BrowserHealthStatus> {
     if (!this.context || !this.page || this.page.isClosed()) {
-      return { browser: "unavailable", gemini: "unavailable" };
+      return { browser: "unavailable", gemini: "unknown" };
     }
 
     try {
+      const currentUrl = this.page.url();
+      if (!currentUrl.includes("gemini.google.com")) {
+        // Navigate to Gemini if on about:blank
+        await this.page.goto("https://gemini.google.com/app", {
+          waitUntil: "domcontentloaded",
+          timeout: 15000,
+        });
+      }
+
       const isUnauth = await GeminiPage.isUnauthenticated(this.page);
       if (isUnauth) {
         return { browser: "ready", gemini: "authentication_required" };
       }
-      return { browser: "ready", gemini: "ready" };
+
+      const isAuth = await GeminiPage.isAuthenticated(this.page);
+      if (isAuth) {
+        return { browser: "ready", gemini: "ready" };
+      }
+
+      return { browser: "ready", gemini: "unavailable" };
     } catch {
       return { browser: "ready", gemini: "unavailable" };
     }

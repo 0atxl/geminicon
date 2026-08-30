@@ -4,7 +4,7 @@ import { GatewayTask, WorkerResult } from "../src/types.js";
 import { GatewayError } from "../src/gateway/errors.js";
 
 describe("TaskQueue", () => {
-  it("should process tasks strictly sequentially with concurrency = 1", async () => {
+  it("should process tasks strictly sequentially in FIFO order with concurrency = 1", async () => {
     const executionOrder: string[] = [];
 
     const mockWorker = vi.fn(async (task: GatewayTask): Promise<WorkerResult> => {
@@ -24,7 +24,6 @@ describe("TaskQueue", () => {
     const taskB: GatewayTask = { id: "B", model: "gemini-web", prompt: "Task B", createdAt: Date.now() };
     const taskC: GatewayTask = { id: "C", model: "gemini-web", prompt: "Task C", createdAt: Date.now() };
 
-    // Enqueue all concurrently
     const [resA, resB, resC] = await Promise.all([
       queue.enqueue(taskA),
       queue.enqueue(taskB),
@@ -35,7 +34,6 @@ describe("TaskQueue", () => {
     expect(resB.text).toBe("Answer for B");
     expect(resC.text).toBe("Answer for C");
 
-    // Must be strictly start-A -> finish-A -> start-B -> finish-B -> start-C -> finish-C
     expect(executionOrder).toEqual([
       "start-A",
       "finish-A",
@@ -44,6 +42,36 @@ describe("TaskQueue", () => {
       "start-C",
       "finish-C",
     ]);
+  });
+
+  it("should propagate worker failure and continue processing subsequent tasks", async () => {
+    const mockWorker = vi.fn(async (task: GatewayTask): Promise<WorkerResult> => {
+      if (task.id === "fail") {
+        throw GatewayError.promptSubmissionFailed("Simulated submission failure");
+      }
+      return {
+        requestId: task.id,
+        text: `Success ${task.id}`,
+        latencyMs: 10,
+      };
+    });
+
+    const queue = new TaskQueue(mockWorker, 10);
+
+    const taskFail: GatewayTask = { id: "fail", model: "gemini-web", prompt: "Fail", createdAt: Date.now() };
+    const taskSuccess: GatewayTask = { id: "success", model: "gemini-web", prompt: "Success", createdAt: Date.now() };
+
+    const failPromise = queue.enqueue(taskFail);
+    const successPromise = queue.enqueue(taskSuccess);
+
+    await expect(failPromise).rejects.toThrowError(GatewayError);
+    await expect(failPromise).rejects.toMatchObject({
+      errorType: "prompt_submission_failed",
+      statusCode: 502,
+    });
+
+    const successResult = await successPromise;
+    expect(successResult.text).toBe("Success success");
   });
 
   it("should reject with 429 queue_full when queue maximum size is reached", async () => {
@@ -64,14 +92,10 @@ describe("TaskQueue", () => {
     const task3: GatewayTask = { id: "3", model: "gemini-web", prompt: "3", createdAt: Date.now() };
     const task4: GatewayTask = { id: "4", model: "gemini-web", prompt: "4", createdAt: Date.now() };
 
-    // task1 starts immediately (active)
     const p1 = queue.enqueue(task1);
-    // task2 is queued (item 1 in queue)
     const p2 = queue.enqueue(task2);
-    // task3 is queued (item 2 in queue, reaching max 2)
     const p3 = queue.enqueue(task3);
 
-    // task4 should immediately throw queue_full error
     expect(() => queue.enqueue(task4)).toThrowError(GatewayError);
 
     unblockWorker();

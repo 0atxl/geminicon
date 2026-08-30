@@ -10,6 +10,8 @@ export interface GatewayConfig {
   browserProfilePath: string;
   generationTimeoutMs: number;
   queueMaxSize: number;
+  logLevel: string;
+  logContent: boolean;
   useTemporaryChat: boolean;
 }
 
@@ -25,5 +27,7 @@ export const config: GatewayConfig = {
     10
   ),
   queueMaxSize: parseInt(process.env.QUEUE_MAX_SIZE || "20", 10),
+  logLevel: process.env.LOG_LEVEL || "info",
+  logContent: process.env.LOG_CONTENT === "true",
   useTemporaryChat: process.env.USE_TEMPORARY_CHAT !== "false",
 };

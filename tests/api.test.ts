@@ -25,6 +25,7 @@ describe("API Endpoints", () => {
           error: {
             message: err.message || "Invalid request payload.",
             type: "invalid_request",
+            code: "invalid_request",
           },
         });
       }
@@ -32,6 +33,17 @@ describe("API Endpoints", () => {
         error: {
           message: err.message || "Internal error",
           type: "internal_error",
+          code: "internal_error",
+        },
+      });
+    });
+
+    app.setNotFoundHandler((request, reply) => {
+      return reply.code(404).send({
+        error: {
+          message: `Endpoint '${request.method} ${request.url}' not found.`,
+          type: "invalid_request",
+          code: "endpoint_not_found",
         },
       });
     });
@@ -114,6 +126,46 @@ describe("API Endpoints", () => {
         gemini: "authentication_required",
       });
     });
+
+    it("should return 503 degraded when gemini page is unavailable", async () => {
+      mockBrowserManager.checkHealth.mockResolvedValueOnce({
+        browser: "ready",
+        gemini: "unavailable",
+      });
+
+      const res = await app.inject({
+        method: "GET",
+        url: "/health",
+      });
+
+      expect(res.statusCode).toBe(503);
+      const body = JSON.parse(res.body);
+      expect(body).toEqual({
+        status: "degraded",
+        browser: "ready",
+        gemini: "unavailable",
+      });
+    });
+
+    it("should return 503 error when browser is unavailable", async () => {
+      mockBrowserManager.checkHealth.mockResolvedValueOnce({
+        browser: "unavailable",
+        gemini: "unknown",
+      });
+
+      const res = await app.inject({
+        method: "GET",
+        url: "/health",
+      });
+
+      expect(res.statusCode).toBe(503);
+      const body = JSON.parse(res.body);
+      expect(body).toEqual({
+        status: "error",
+        browser: "unavailable",
+        gemini: "unknown",
+      });
+    });
   });
 
   describe("POST /v1/chat/completions", () => {
@@ -153,7 +205,7 @@ describe("API Endpoints", () => {
       expect(body.error.type).toBe("unsupported_model");
     });
 
-    it("should reject stream: true with 400 unsupported_feature", async () => {
+    it("should reject stream: true with 400 unsupported_feature and streaming_not_supported code", async () => {
       const res = await app.inject({
         method: "POST",
         url: "/v1/chat/completions",
@@ -167,6 +219,7 @@ describe("API Endpoints", () => {
       expect(res.statusCode).toBe(400);
       const body = JSON.parse(res.body);
       expect(body.error.type).toBe("unsupported_feature");
+      expect(body.error.code).toBe("streaming_not_supported");
       expect(body.error.message).toBe("Streaming is not supported in V1.");
     });
 
@@ -182,6 +235,32 @@ describe("API Endpoints", () => {
       expect(res.statusCode).toBe(400);
       const body = JSON.parse(res.body);
       expect(body.error.type).toBe("invalid_request");
+    });
+
+    it("should reject multimodal content with 400 invalid_request", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/v1/chat/completions",
+        payload: {
+          model: "gemini-web",
+          messages: [{ role: "user", content: [{ type: "image_url" }] }],
+        },
+      });
+
+      expect(res.statusCode).toBe(400);
+      const body = JSON.parse(res.body);
+      expect(body.error.type).toBe("invalid_request");
+    });
+
+    it("should return 404 for unknown endpoint", async () => {
+      const res = await app.inject({
+        method: "GET",
+        url: "/v1/unknown",
+      });
+
+      expect(res.statusCode).toBe(404);
+      const body = JSON.parse(res.body);
+      expect(body.error.code).toBe("endpoint_not_found");
     });
   });
 });

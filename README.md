@@ -1,46 +1,59 @@
-# Gemini Web Gateway — Minimal V1
+# geminicon — Minimal Gemini Web Gateway (V1)
 
-A minimal local OpenAI-compatible HTTP gateway that bridges requests to **Google Gemini Web** via an automated **Playwright Chromium browser worker** using a persistent user profile.
+A minimal local browser-backed Gemini Web gateway exposing a basic OpenAI Chat Completions-compatible text interface.
 
 ---
 
 ## Architecture
 
 ```text
-Your Application (OpenAI SDK / LangChain / RAG)
-                      │
-                      │ POST /v1/chat/completions
-                      ▼
-            Gemini Web Gateway (Fastify)
-                      │
-                      ▼
-               Task Queue (FIFO, concurrency = 1)
-                      │
-                      ▼
-          Playwright Browser Worker (Persistent Chromium)
-                      │
-                      ▼
-              gemini.google.com/app
-                      │
-                      ▼
-             Extract Response Text
-                      │
-                      ▼
-            OpenAI-Compatible JSON
-                      │
-                      ▼
-               Your Application
+Client / RAG / Chatbot
+        │
+        ▼
+POST /v1/chat/completions
+        │
+        ▼
+Fastify HTTP Gateway
+        │
+        ▼
+Request validation
+        │
+        ▼
+Request normalization
+        │
+        ▼
+FIFO Queue (concurrency = 1)
+        │
+        ▼
+Gemini Web Worker
+        │
+        ▼
+Browser Manager
+        │
+        ▼
+Playwright Chromium (persistent browser profile)
+        │
+        ▼
+gemini.google.com
+        │
+        ▼
+submit prompt
+        │
+        ▼
+wait for generation
+        │
+        ▼
+extract final response
+        │
+        ▼
+Response normalizer
+        │
+        ▼
+OpenAI-compatible JSON
+        │
+        ▼
+Client
 ```
-
----
-
-## Features
-
-- **100% OpenAI API Compatible**: Exposes standard `POST /v1/chat/completions` and `GET /v1/models`.
-- **Zero API Key Needed**: Leverages your logged-in Google Gemini browser session.
-- **Stateless & Fresh**: Opens a fresh chat on Gemini per request; your application manages conversation history.
-- **Strict Concurrency (1)**: Uses an in-process FIFO task queue to eliminate race conditions and browser state collision.
-- **Zero Fallbacks / Fakes**: Never returns synthetic responses. Explicit errors on failures.
 
 ---
 
@@ -51,7 +64,7 @@ Your Application (OpenAI SDK / LangChain / RAG)
 
 ---
 
-## Quickstart
+## Setup & First-Time Login
 
 ### 1. Install Dependencies
 ```bash
@@ -63,11 +76,11 @@ npx playwright install chromium
 
 To log into your Google Account for Gemini Web:
 
-1. Create a `.env` file (or copy from `.env.example`):
+1. Create your `.env` file:
    ```bash
    cp .env.example .env
    ```
-2. Temporarily set `HEADLESS=false` in `.env`:
+2. Set `HEADLESS=false` in `.env`:
    ```env
    HEADLESS=false
    ```
@@ -75,12 +88,13 @@ To log into your Google Account for Gemini Web:
    ```bash
    npm start
    ```
-4. A Chromium window will open at `https://gemini.google.com/app`. Log into your Google Account.
-5. Once logged in, stop the gateway (`Ctrl+C`) and switch back to `HEADLESS=true` in `.env`.
+4. A Chromium browser window will open at `https://gemini.google.com/app`. Log into your Google Account normally.
+5. Once logged in and the Gemini interface is visible, stop the gateway (`Ctrl+C`).
+6. Switch back to `HEADLESS=true` in `.env` for background operation.
 
-The session is stored persistently in `./browser-data/profile`.
+The session is persisted locally in `./browser-data/profile`.
 
-### 3. Run the Gateway
+### 3. Normal Operation
 
 ```bash
 npm start
@@ -102,11 +116,11 @@ curl http://127.0.0.1:8765/v1/chat/completions \
     "messages": [
       {
         "role": "system",
-        "content": "You are a concise technical assistant."
+        "content": "Answer using only the supplied context."
       },
       {
         "role": "user",
-        "content": "Explain Kubernetes pods in two sentences."
+        "content": "Where is the server hosted?"
       }
     ]
   }'
@@ -119,7 +133,7 @@ from openai import OpenAI
 
 client = OpenAI(
     base_url="http://127.0.0.1:8765/v1",
-    api_key="local"  # Any string (required by SDK)
+    api_key="local"  # Required by SDK, ignored by gateway
 )
 
 response = client.chat.completions.create(
@@ -163,9 +177,32 @@ main();
 
 | Method | Endpoint | Description |
 | :--- | :--- | :--- |
-| `POST` | `/v1/chat/completions` | Standard chat completion (model: `gemini-web`, non-streaming) |
-| `GET` | `/v1/models` | Lists available models (`gemini-web`) |
-| `GET` | `/health` | Health status of gateway, browser, and Gemini authentication |
+| `POST` | `/v1/chat/completions` | Text chat completions for model `gemini-web` (non-streaming) |
+| `GET` | `/v1/models` | Lists available model (`gemini-web`) |
+| `GET` | `/health` | Live readiness status of the browser and Gemini Web session |
+
+---
+
+## Health Endpoint
+
+`GET /health` returns:
+
+* **Healthy (HTTP 200)**:
+  ```json
+  { "status": "ok", "browser": "ready", "gemini": "ready" }
+  ```
+* **Authentication Required (HTTP 503)**:
+  ```json
+  { "status": "degraded", "browser": "ready", "gemini": "authentication_required" }
+  ```
+* **Gemini Unavailable (HTTP 503)**:
+  ```json
+  { "status": "degraded", "browser": "ready", "gemini": "unavailable" }
+  ```
+* **Browser Unavailable (HTTP 503)**:
+  ```json
+  { "status": "error", "browser": "unavailable", "gemini": "unknown" }
+  ```
 
 ---
 
@@ -179,7 +216,22 @@ main();
 | `BROWSER_PROFILE_PATH` | `./browser-data/profile` | Directory storing persistent Google browser profile |
 | `GENERATION_TIMEOUT_MS` | `180000` | Max wait time for Gemini response (ms) |
 | `QUEUE_MAX_SIZE` | `20` | Max pending tasks in queue before returning HTTP 429 |
-| `USE_TEMPORARY_CHAT` | `true` | Automatically enable Temporary Chat mode so requests don't pollute your Gemini sidebar history |
+| `USE_TEMPORARY_CHAT` | `true` | Automatically enable Temporary Chat mode so requests do not appear in recent sidebar history |
+| `LOG_LEVEL` | `info` | Fastify / Pino log level |
+| `LOG_CONTENT` | `false` | When true, logs prompt and response content for local debugging |
+
+---
+
+## Known Limitations
+
+* **Web UI Dependent**: Relies on `gemini.google.com` web DOM. Future Google UI updates may require selector adjustments in `src/providers/gemini-web/selectors.ts`.
+* **Sequential Concurrency**: Requests are processed strictly one at a time (`concurrency = 1`) to ensure stable browser state.
+* **No Streaming in V1**: Streaming (`stream: true`) is rejected with HTTP 400.
+* **No Function Calling / Tools**: V1 supports text inference only.
+* **No Multimodal Input**: Plain text strings only.
+* **No Token Accounting**: `usage` object is omitted rather than fabricating synthetic counts.
+* **Session Required**: Requires a valid, logged-in Google Account session in the persistent profile.
+* **Service Limits**: Standard Google Gemini Web rate limits and usage conditions apply.
 
 ---
 

@@ -46,6 +46,14 @@ export const selectors = {
     "[class*='response-content']",
   ].join(", "),
 
+  // Upstream rate limit / quota indicators
+  upstreamLimitIndicators: [
+    'div:has-text("You\'ve reached your limit")',
+    'div:has-text("rate limit exceeded")',
+    'div:has-text("Please try again later")',
+    '[data-test-id*="rate-limit"]',
+  ].join(", "),
+
   // Login / Auth challenge indicators
   loginIndicators: [
     'a[href*="accounts.google.com"]',

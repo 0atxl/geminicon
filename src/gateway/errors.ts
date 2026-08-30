@@ -15,7 +15,7 @@ export class GatewayError extends Error {
     this.name = "GatewayError";
     this.errorType = errorType;
     this.statusCode = statusCode;
-    this.code = code;
+    this.code = code || errorType;
     Object.setPrototypeOf(this, GatewayError.prototype);
   }
 
@@ -29,7 +29,10 @@ export class GatewayError extends Error {
     };
   }
 
-  public static invalidRequest(message: string, code?: string): GatewayError {
+  public static invalidRequest(
+    message: string,
+    code = "invalid_request"
+  ): GatewayError {
     return new GatewayError(message, "invalid_request", 400, code);
   }
 
@@ -45,25 +48,17 @@ export class GatewayError extends Error {
     );
   }
 
-  public static unsupportedFeature(message: string): GatewayError {
-    return new GatewayError(message, "unsupported_feature", 400);
+  public static unsupportedFeature(
+    message: string,
+    code = "unsupported_feature"
+  ): GatewayError {
+    return new GatewayError(message, "unsupported_feature", 400, code);
   }
 
   public static queueFull(
     message = "Task queue is full. Please try again later."
   ): GatewayError {
     return new GatewayError(message, "queue_full", 429, "queue_full");
-  }
-
-  public static browserUnavailable(
-    message = "Playwright browser instance is unavailable."
-  ): GatewayError {
-    return new GatewayError(
-      message,
-      "browser_unavailable",
-      503,
-      "browser_unavailable"
-    );
   }
 
   public static authenticationRequired(
@@ -77,14 +72,53 @@ export class GatewayError extends Error {
     );
   }
 
+  public static browserUnavailable(
+    message = "Playwright browser instance is unavailable."
+  ): GatewayError {
+    return new GatewayError(
+      message,
+      "browser_unavailable",
+      503,
+      "browser_unavailable"
+    );
+  }
+
+  public static geminiUnavailable(
+    message = "Gemini Web page is unavailable."
+  ): GatewayError {
+    return new GatewayError(
+      message,
+      "gemini_unavailable",
+      503,
+      "gemini_unavailable"
+    );
+  }
+
+  public static upstreamLimit(
+    message = "Upstream Gemini Web rate limit or usage condition reached."
+  ): GatewayError {
+    return new GatewayError(message, "upstream_limit", 429, "upstream_limit");
+  }
+
   public static promptSubmissionFailed(
     message = "Failed to insert or submit prompt to Gemini Web composer."
   ): GatewayError {
     return new GatewayError(
       message,
       "prompt_submission_failed",
-      500,
+      502,
       "prompt_submission_failed"
+    );
+  }
+
+  public static responseExtractionFailed(
+    message = "Failed to extract generated response text from Gemini Web page."
+  ): GatewayError {
+    return new GatewayError(
+      message,
+      "response_extraction_failed",
+      502,
+      "response_extraction_failed"
     );
   }
 
@@ -99,15 +133,10 @@ export class GatewayError extends Error {
     );
   }
 
-  public static responseExtractionFailed(
-    message = "Failed to extract generated response text from Gemini Web page."
+  public static upstreamError(
+    message = "Upstream Gemini Web error encountered."
   ): GatewayError {
-    return new GatewayError(
-      message,
-      "response_extraction_failed",
-      500,
-      "response_extraction_failed"
-    );
+    return new GatewayError(message, "upstream_error", 502, "upstream_error");
   }
 
   public static internalError(

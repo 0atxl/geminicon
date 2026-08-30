@@ -52,13 +52,14 @@ export type GatewayErrorCode =
   | "invalid_request"
   | "unsupported_model"
   | "unsupported_feature"
-  | "browser_unavailable"
-  | "authentication_required"
-  | "prompt_submission_failed"
-  | "generation_timeout"
-  | "response_extraction_failed"
   | "queue_full"
+  | "authentication_required"
+  | "browser_unavailable"
+  | "gemini_unavailable"
   | "upstream_limit"
+  | "prompt_submission_failed"
+  | "response_extraction_failed"
+  | "generation_timeout"
   | "upstream_error"
   | "internal_error";
 
@@ -73,7 +74,7 @@ export interface GatewayErrorPayload {
 export interface HealthStatus {
   status: "ok" | "degraded" | "error";
   browser: "ready" | "unavailable";
-  gemini?: "ready" | "authentication_required" | "unavailable";
+  gemini: "ready" | "authentication_required" | "unavailable" | "unknown";
 }
 
 export interface ModelsResponse {
