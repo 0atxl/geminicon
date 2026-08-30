@@ -1,0 +1,45 @@
+import { GatewayTask, WorkerResult } from "../../types.js";
+import { BrowserManager } from "./browser-manager.js";
+import { GeminiPage } from "./gemini-page.js";
+import { GatewayConfig } from "../../config.js";
+
+export class GeminiWorker {
+  private browserManager: BrowserManager;
+  private config: GatewayConfig;
+
+  constructor(browserManager: BrowserManager, config: GatewayConfig) {
+    this.browserManager = browserManager;
+    this.config = config;
+  }
+
+  /**
+   * Executes a single inference task against Gemini Web.
+   */
+  public async execute(task: GatewayTask): Promise<WorkerResult> {
+    const startTime = Date.now();
+    const page = await this.browserManager.getPage();
+
+    // 1. Ensure authenticated
+    await GeminiPage.ensureAuthenticated(page);
+
+    // 2. Start fresh chat (using Temporary Chat mode if configured)
+    await GeminiPage.startFreshChat(page, this.config.useTemporaryChat);
+
+    // 3. Submit full normalized prompt
+    await GeminiPage.submitPrompt(page, task.prompt);
+
+    // 4. Wait for Gemini Web generation to complete and extract text
+    const text = await GeminiPage.waitForCompletionAndExtract(
+      page,
+      this.config.generationTimeoutMs
+    );
+
+    const latencyMs = Date.now() - startTime;
+
+    return {
+      requestId: task.id,
+      text,
+      latencyMs,
+    };
+  }
+}

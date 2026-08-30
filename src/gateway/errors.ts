@@ -1,0 +1,118 @@
+import { GatewayErrorCode, GatewayErrorPayload } from "../types.js";
+
+export class GatewayError extends Error {
+  public readonly statusCode: number;
+  public readonly errorType: GatewayErrorCode;
+  public readonly code?: string;
+
+  constructor(
+    message: string,
+    errorType: GatewayErrorCode = "internal_error",
+    statusCode = 500,
+    code?: string
+  ) {
+    super(message);
+    this.name = "GatewayError";
+    this.errorType = errorType;
+    this.statusCode = statusCode;
+    this.code = code;
+    Object.setPrototypeOf(this, GatewayError.prototype);
+  }
+
+  public toPayload(): GatewayErrorPayload {
+    return {
+      error: {
+        message: this.message,
+        type: this.errorType,
+        ...(this.code ? { code: this.code } : {}),
+      },
+    };
+  }
+
+  public static invalidRequest(message: string, code?: string): GatewayError {
+    return new GatewayError(message, "invalid_request", 400, code);
+  }
+
+  public static unsupportedModel(
+    model: string,
+    supported = "gemini-web"
+  ): GatewayError {
+    return new GatewayError(
+      `Model '${model}' is not supported. Supported model is '${supported}'.`,
+      "unsupported_model",
+      400,
+      "unsupported_model"
+    );
+  }
+
+  public static unsupportedFeature(message: string): GatewayError {
+    return new GatewayError(message, "unsupported_feature", 400);
+  }
+
+  public static queueFull(
+    message = "Task queue is full. Please try again later."
+  ): GatewayError {
+    return new GatewayError(message, "queue_full", 429, "queue_full");
+  }
+
+  public static browserUnavailable(
+    message = "Playwright browser instance is unavailable."
+  ): GatewayError {
+    return new GatewayError(
+      message,
+      "browser_unavailable",
+      503,
+      "browser_unavailable"
+    );
+  }
+
+  public static authenticationRequired(
+    message = "Gemini Web authentication is required. Please log into Google Gemini using the browser profile."
+  ): GatewayError {
+    return new GatewayError(
+      message,
+      "authentication_required",
+      503,
+      "authentication_required"
+    );
+  }
+
+  public static promptSubmissionFailed(
+    message = "Failed to insert or submit prompt to Gemini Web composer."
+  ): GatewayError {
+    return new GatewayError(
+      message,
+      "prompt_submission_failed",
+      500,
+      "prompt_submission_failed"
+    );
+  }
+
+  public static generationTimeout(
+    message = "Gemini did not complete generation within the configured timeout."
+  ): GatewayError {
+    return new GatewayError(
+      message,
+      "generation_timeout",
+      504,
+      "gemini_generation_timeout"
+    );
+  }
+
+  public static responseExtractionFailed(
+    message = "Failed to extract generated response text from Gemini Web page."
+  ): GatewayError {
+    return new GatewayError(
+      message,
+      "response_extraction_failed",
+      500,
+      "response_extraction_failed"
+    );
+  }
+
+  public static internalError(
+    message = "An internal gateway error occurred."
+  ): GatewayError {
+    return new GatewayError(message, "internal_error", 500, "internal_error");
+  }
+}
