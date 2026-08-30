@@ -12,7 +12,6 @@ export interface GatewayConfig {
   queueMaxSize: number;
   logLevel: string;
   logContent: boolean;
-  useTemporaryChat: boolean;
 }
 
 export const config: GatewayConfig = {
@@ -29,5 +28,4 @@ export const config: GatewayConfig = {
   queueMaxSize: parseInt(process.env.QUEUE_MAX_SIZE || "20", 10),
   logLevel: process.env.LOG_LEVEL || "info",
   logContent: process.env.LOG_CONTENT === "true",
-  useTemporaryChat: process.env.USE_TEMPORARY_CHAT !== "false",
 };

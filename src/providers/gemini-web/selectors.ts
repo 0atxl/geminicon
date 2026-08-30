@@ -21,7 +21,7 @@ export const selectors = {
     'button[aria-label*="Send"]',
   ].join(", "),
 
-  // Temporary chat button (exact priority list)
+  // Temporary chat activation button (never treated as active state)
   temporaryChatButton: [
     'button[aria-label="Temporary chat"]',
     'button[aria-label="Temporary chat" i]',
@@ -29,12 +29,16 @@ export const selectors = {
     'button[data-test-id="temporary-chat-button"]',
   ].join(", "),
 
-  // Temporary chat positive active indicators
+  // Temporary chat positive active indicators (only present when temporary mode is active)
   temporaryChatActiveIndicator: [
     'button[aria-label="Close temporary chat"]',
     'button[aria-label="Exit temporary chat"]',
+    'button[aria-label*="Close temporary" i]',
+    'button[aria-label*="Exit temporary" i]',
     '[data-test-id="temporary-chat-indicator"]',
+    '[data-test-id="temporary-chat-active"]',
     '[aria-label*="temporary chat is on" i]',
+    '[aria-label*="temporary chat is active" i]',
   ].join(", "),
 
   // Sidebar / menu toggle button

@@ -97,22 +97,27 @@ export class GeminiPage {
 
   /**
    * Positively checks if Gemini Web is actively in Temporary Chat mode.
-   * Returns true ONLY when affirmative evidence of temporary mode is present.
+   * Returns true ONLY when affirmative evidence of active temporary mode is present.
+   * Never treats the activation button or generic text as active state.
    */
   public static async isTemporaryChatActive(page: Page): Promise<boolean> {
     try {
+      // 1. Check positive active indicator elements (e.g. Close/Exit temporary chat button or active badge)
+      const indicator = page
+        .locator(selectors.temporaryChatActiveIndicator)
+        .first();
+
+      if (await indicator.isVisible().catch(() => false)) {
+        return true;
+      }
+
+      // 2. Check for unique active temporary mode text that only exists in active temporary chat
       return await page.evaluate(function () {
         const text = document.body.innerText;
-        const hasTempText =
+        return (
           text.includes("Just stopping by?") ||
-          text.includes("Temporary chats don't appear in recent chats") ||
-          text.includes("Temporary chat");
-
-        const hasTempIndicator = !!document.querySelector(
-          "button[aria-label*='temporary' i], [data-test-id*='temporary'], [aria-label*='Temporary chat']"
+          text.includes("don't appear in recent chats")
         );
-
-        return hasTempText || hasTempIndicator;
       });
     } catch {
       return false;
@@ -197,10 +202,19 @@ export class GeminiPage {
 
   /**
    * Inserts the full prompt into the composer, verifies it, and submits.
+   * Strictly asserts that Temporary Chat is actively verified prior to submission.
    * Returns the initial response count prior to submission for response tracking.
    */
   public static async submitPrompt(page: Page, prompt: string): Promise<number> {
     try {
+      // Strict assertion: ensure Temporary Chat is actively verified before submitting
+      const isTempActive = await this.isTemporaryChatActive(page);
+      if (!isTempActive) {
+        throw GatewayError.temporaryChatFailed(
+          "Refusing to submit prompt: Temporary Chat mode is not actively verified."
+        );
+      }
+
       const composer = page.locator(selectors.promptInput).first();
       await composer.waitFor({ state: "visible", timeout: 15000 });
       await composer.click();
