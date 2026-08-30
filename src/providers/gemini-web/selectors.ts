@@ -21,11 +21,27 @@ export const selectors = {
     'button[aria-label*="Send"]',
   ].join(", "),
 
-  // Exact Temporary chat toggle button
+  // Temporary chat button (exact priority list)
   temporaryChatButton: [
     'button[aria-label="Temporary chat"]',
     'button[aria-label="Temporary chat" i]',
+    '[role="button"][aria-label="Temporary chat" i]',
     'button[data-test-id="temporary-chat-button"]',
+  ].join(", "),
+
+  // Temporary chat positive active indicators
+  temporaryChatActiveIndicator: [
+    'button[aria-label="Close temporary chat"]',
+    'button[aria-label="Exit temporary chat"]',
+    '[data-test-id="temporary-chat-indicator"]',
+    '[aria-label*="temporary chat is on" i]',
+  ].join(", "),
+
+  // Sidebar / menu toggle button
+  menuButton: [
+    'button[aria-label="Open sidebar"]',
+    'button[aria-label="Main menu"]',
+    'button[data-test-id="side-nav-sparkle-button"]',
   ].join(", "),
 
   // Active generation / stop indicators

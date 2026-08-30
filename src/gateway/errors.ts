@@ -94,6 +94,28 @@ export class GatewayError extends Error {
     );
   }
 
+  public static temporaryChatUnavailable(
+    message = "Gemini Temporary Chat control was not found. Never falling back to normal chat."
+  ): GatewayError {
+    return new GatewayError(
+      message,
+      "temporary_chat_unavailable",
+      502,
+      "temporary_chat_unavailable"
+    );
+  }
+
+  public static temporaryChatFailed(
+    message = "Gemini Temporary Chat could not be activated."
+  ): GatewayError {
+    return new GatewayError(
+      message,
+      "temporary_chat_failed",
+      502,
+      "gemini_temporary_chat_failed"
+    );
+  }
+
   public static upstreamLimit(
     message = "Upstream Gemini Web rate limit or usage condition reached."
   ): GatewayError {

@@ -11,6 +11,7 @@ export interface OpenAIChatRequest {
   temperature?: number;
   top_p?: number;
   max_tokens?: number;
+  n?: number;
 }
 
 export interface OpenAIChatChoice {
@@ -56,6 +57,8 @@ export type GatewayErrorCode =
   | "authentication_required"
   | "browser_unavailable"
   | "gemini_unavailable"
+  | "temporary_chat_unavailable"
+  | "temporary_chat_failed"
   | "upstream_limit"
   | "prompt_submission_failed"
   | "response_extraction_failed"

@@ -4,6 +4,16 @@ import { GatewayError } from "../../gateway/errors.js";
 
 export class GeminiPage {
   /**
+   * Navigates directly to Gemini Web.
+   */
+  public static async open(page: Page): Promise<void> {
+    await page.goto("https://gemini.google.com/app", {
+      waitUntil: "domcontentloaded",
+      timeout: 30000,
+    });
+  }
+
+  /**
    * Positively checks if the current page is on Gemini Web and authenticated.
    */
   public static async isAuthenticated(page: Page): Promise<boolean> {
@@ -76,10 +86,7 @@ export class GeminiPage {
   public static async ensureReady(page: Page): Promise<void> {
     const url = page.url();
     if (!url.includes("gemini.google.com")) {
-      await page.goto("https://gemini.google.com/app", {
-        waitUntil: "domcontentloaded",
-        timeout: 30000,
-      });
+      await this.open(page);
     }
 
     await this.ensureAuthenticated(page);
@@ -89,53 +96,94 @@ export class GeminiPage {
   }
 
   /**
-   * Navigates to Gemini Web and starts a fresh conversation (guaranteed Temporary Chat mode if enabled).
+   * Positively checks if Gemini Web is actively in Temporary Chat mode.
+   * Returns true ONLY when affirmative evidence of temporary mode is present.
    */
-  public static async startFreshChat(
-    page: Page,
-    useTemporaryChat = true
-  ): Promise<void> {
+  public static async isTemporaryChatActive(page: Page): Promise<boolean> {
     try {
-      await page.goto("https://gemini.google.com/app", {
-        waitUntil: "domcontentloaded",
-        timeout: 30000,
-      });
+      return await page.evaluate(function () {
+        const text = document.body.innerText;
+        const hasTempText =
+          text.includes("Just stopping by?") ||
+          text.includes("Temporary chats don't appear in recent chats") ||
+          text.includes("Temporary chat");
 
+        const hasTempIndicator = !!document.querySelector(
+          "button[aria-label*='temporary' i], [data-test-id*='temporary'], [aria-label*='Temporary chat']"
+        );
+
+        return hasTempText || hasTempIndicator;
+      });
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Starts a fresh Temporary Chat session for the current request.
+   * Never falls back to normal chat.
+   */
+  public static async startTemporaryChat(page: Page): Promise<void> {
+    try {
+      // 1. Navigate fresh to Gemini Web root
+      await this.open(page);
       await this.ensureAuthenticated(page);
 
-      // If temporary chat requested, check if Temporary Chat is already active
-      if (useTemporaryChat) {
-        const isAlreadyTemp = await page.evaluate(function () {
-          const text = document.body.innerText;
-          return (
-            text.includes("Just stopping by?") ||
-            text.includes("Temporary chat") ||
-            text.includes("Temporary chats don't appear in recent chats")
-          );
-        });
+      // 2. Locate Temporary Chat button with wait
+      let tempBtn = page.locator(selectors.temporaryChatButton).first();
+      let isVisible = await tempBtn
+        .waitFor({ state: "visible", timeout: 8000 })
+        .then(() => true)
+        .catch(() => false);
 
-        if (!isAlreadyTemp) {
-          const tempBtn = page.locator('button[aria-label="Temporary chat"]').first();
-          if (await tempBtn.isVisible().catch(() => false)) {
-            await tempBtn.click();
-            await page.waitForTimeout(500);
-          }
+      if (!isVisible) {
+        // Try opening the sidebar menu if collapsed
+        const menuBtn = page.locator(selectors.menuButton).first();
+        if (await menuBtn.isVisible().catch(() => false)) {
+          await menuBtn.click();
+          tempBtn = page.locator(selectors.temporaryChatButton).first();
+          isVisible = await tempBtn
+            .waitFor({ state: "visible", timeout: 4000 })
+            .then(() => true)
+            .catch(() => false);
         }
       }
 
-      // Wait for prompt composer to appear
+      if (!isVisible) {
+        throw GatewayError.temporaryChatUnavailable(
+          "Temporary Chat button was not found. Refusing to fall back to normal chat."
+        );
+      }
+
+      // 3. Click Temporary Chat button
+      await tempBtn.click();
+
+      // 4. Wait for Temporary Chat mode to activate positively
+      let activated = false;
+      for (let i = 0; i < 15; i++) {
+        await page.waitForTimeout(300);
+        if (await this.isTemporaryChatActive(page)) {
+          activated = true;
+          break;
+        }
+      }
+
+      if (!activated) {
+        throw GatewayError.temporaryChatFailed(
+          "Gemini did not enter Temporary Chat mode after button interaction."
+        );
+      }
+
+      // 5. Wait for prompt composer to be visible & ready
       const composer = page.locator(selectors.promptInput).first();
-      await composer.waitFor({
-        timeout: 15000,
-        state: "visible",
-      });
+      await composer.waitFor({ state: "visible", timeout: 15000 });
     } catch (err: any) {
       if (err instanceof GatewayError) throw err;
       const unauth = await this.isUnauthenticated(page);
       if (unauth) throw GatewayError.authenticationRequired();
 
-      throw GatewayError.browserUnavailable(
-        `Failed to open fresh Gemini Web chat: ${err.message}`
+      throw GatewayError.temporaryChatFailed(
+        `Failed to activate fresh Temporary Chat: ${err.message}`
       );
     }
   }

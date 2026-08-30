@@ -57,6 +57,20 @@ describe("GatewayError", () => {
     expect(err.errorType).toBe("gemini_unavailable");
   });
 
+  it("should format temporaryChatUnavailable correctly with HTTP 502", () => {
+    const err = GatewayError.temporaryChatUnavailable();
+    expect(err.statusCode).toBe(502);
+    expect(err.errorType).toBe("temporary_chat_unavailable");
+    expect(err.code).toBe("temporary_chat_unavailable");
+  });
+
+  it("should format temporaryChatFailed correctly with HTTP 502", () => {
+    const err = GatewayError.temporaryChatFailed();
+    expect(err.statusCode).toBe(502);
+    expect(err.errorType).toBe("temporary_chat_failed");
+    expect(err.code).toBe("gemini_temporary_chat_failed");
+  });
+
   it("should format upstreamLimit correctly with HTTP 429", () => {
     const err = GatewayError.upstreamLimit();
     expect(err.statusCode).toBe(429);
