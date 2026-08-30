@@ -35,6 +35,7 @@ const chatCompletionSchema = z.object({
   temperature: z.number().optional(),
   top_p: z.number().optional(),
   max_tokens: z.number().optional(),
+  n: z.number().optional(),
 });
 
 export const registerChatCompletionsRoute = (
@@ -45,7 +46,23 @@ export const registerChatCompletionsRoute = (
       const startTime = Date.now();
       const requestId = `req_${crypto.randomBytes(6).toString("hex")}`;
 
-      // 1. Validate request body against schema
+      // 1. Explicitly check for unsupported features in request body
+      const rawBody = (request.body as Record<string, any>) || {};
+      if (rawBody.tools || rawBody.functions || rawBody.tool_choice) {
+        throw GatewayError.unsupportedFeature(
+          "Function and tool calling are not supported in V1.",
+          "tools_not_supported"
+        );
+      }
+
+      if (rawBody.n && typeof rawBody.n === "number" && rawBody.n > 1) {
+        throw GatewayError.unsupportedFeature(
+          "Parameter 'n' > 1 is not supported in V1.",
+          "unsupported_parameter"
+        );
+      }
+
+      // 2. Validate request body against schema
       const parseResult = chatCompletionSchema.safeParse(request.body);
       if (!parseResult.success) {
         const firstIssue = parseResult.error.issues[0];
@@ -56,12 +73,12 @@ export const registerChatCompletionsRoute = (
 
       const body = parseResult.data;
 
-      // 2. Validate model
+      // 3. Validate model
       if (body.model !== "gemini-web") {
         throw GatewayError.unsupportedModel(body.model);
       }
 
-      // 3. Validate stream option (must explicitly reject with streaming_not_supported)
+      // 4. Validate stream option (must explicitly reject with streaming_not_supported)
       if (body.stream === true) {
         throw GatewayError.unsupportedFeature(
           "Streaming is not supported in V1.",
@@ -69,12 +86,12 @@ export const registerChatCompletionsRoute = (
         );
       }
 
-      // 4. Normalize prompt
+      // 5. Normalize prompt
       const prompt = RequestNormalizer.normalize(
         body.messages as OpenAIMessage[]
       );
 
-      // 5. Create internal task
+      // 6. Create internal task
       const task: GatewayTask = {
         id: requestId,
         model: "gemini-web",
@@ -88,7 +105,7 @@ export const registerChatCompletionsRoute = (
         fastify.log.info({ requestId }, "Request queued");
       }
 
-      // 6. Enqueue task for sequential execution
+      // 7. Enqueue task for sequential execution
       const workerResult = await taskQueue.enqueue(task);
 
       if (config.logContent) {
@@ -103,7 +120,7 @@ export const registerChatCompletionsRoute = (
         );
       }
 
-      // 7. Format OpenAI-compatible response
+      // 8. Format OpenAI-compatible response
       const response = ResponseNormalizer.normalize(workerResult);
 
       return reply.code(200).send(response);

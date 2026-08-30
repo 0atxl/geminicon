@@ -4,7 +4,7 @@ import { GatewayError } from "../../gateway/errors.js";
 
 export class GeminiPage {
   /**
-   * Checks if the current page is on Gemini and positively authenticated.
+   * Positively checks if the current page is on Gemini Web and authenticated.
    */
   public static async isAuthenticated(page: Page): Promise<boolean> {
     try {
@@ -162,7 +162,7 @@ export class GeminiPage {
       const responseElements = page.locator(selectors.responseContainer);
       const initialResponseCount = await responseElements.count().catch(() => 0);
 
-      // Playwright .fill on contenteditable triggers Angular/Quill native change events
+      // Fill prompt into composer
       await composer.fill(prompt);
       await page.waitForTimeout(300);
 
@@ -179,20 +179,20 @@ export class GeminiPage {
       const normExpected = this.normalizeWhitespace(prompt);
       const normActual = this.normalizeWhitespace(text);
 
-      let isVerified = normActual === normExpected;
-      if (!isVerified && prompt.length > 200) {
-        // For large RAG prompts, verify length within 10% and prefix/suffix match
-        const lengthDiff = Math.abs(normActual.length - normExpected.length);
-        const lengthMatches = lengthDiff / normExpected.length < 0.1;
-        const prefixMatches = normActual.startsWith(normExpected.slice(0, 50));
-        const suffixMatches = normActual.endsWith(normExpected.slice(-50));
-        isVerified = lengthMatches && prefixMatches && suffixMatches;
-      }
+      if (normActual !== normExpected) {
+        // Retry insertion once with clean focus and keyboard insertText
+        await composer.click();
+        await page.keyboard.press("ControlOrMeta+A");
+        await page.keyboard.press("Backspace");
+        await page.keyboard.insertText(prompt);
+        await page.waitForTimeout(300);
 
-      if (!isVerified) {
-        throw GatewayError.promptSubmissionFailed(
-          "Prompt insertion verification failed. Refusing to submit partial or corrupted prompt."
-        );
+        const retryText = (await composer.innerText().catch(() => "")) || "";
+        if (this.normalizeWhitespace(retryText) !== normExpected) {
+          throw GatewayError.promptSubmissionFailed(
+            "Prompt insertion verification failed. Refusing to submit partial or corrupted prompt."
+          );
+        }
       }
 
       // Locate send button (now active)
@@ -217,6 +217,7 @@ export class GeminiPage {
   /**
    * Waits for Gemini Web response generation to finish using multiple positive signals.
    * NEVER returns partial text on timeout.
+   * Strictly extracts the response for the current request (count > initialResponseCount).
    */
   public static async waitForCompletionAndExtract(
     page: Page,
@@ -250,18 +251,15 @@ export class GeminiPage {
       const stopBtn = page.locator(selectors.stopGeneratingButton).first();
       const isGenerating = await stopBtn.isVisible().catch(() => false);
 
-      // 4. Extract current response text from DOM
+      // 4. Extract current response count
       const responseElements = page.locator(selectors.responseContainer);
       const count = await responseElements.count().catch(() => 0);
 
-      // 5. Track newest response belonging to current request
+      // 5. Track response strictly belonging to current request
       let currentText = "";
-      if (count > initialResponseCount || count > 0) {
-        currentText =
-          (await responseElements
-            .last()
-            .innerText()
-            .catch(() => "")) || "";
+      if (count > initialResponseCount) {
+        const latestElement = responseElements.nth(count - 1);
+        currentText = (await latestElement.innerText().catch(() => "")) || "";
         currentText = currentText.trim();
       }
 

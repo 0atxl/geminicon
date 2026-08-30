@@ -223,6 +223,40 @@ describe("API Endpoints", () => {
       expect(body.error.message).toBe("Streaming is not supported in V1.");
     });
 
+    it("should reject tools/functions with 400 unsupported_feature", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/v1/chat/completions",
+        payload: {
+          model: "gemini-web",
+          messages: [{ role: "user", content: "Hello" }],
+          tools: [{ type: "function", function: { name: "test" } }],
+        },
+      });
+
+      expect(res.statusCode).toBe(400);
+      const body = JSON.parse(res.body);
+      expect(body.error.type).toBe("unsupported_feature");
+      expect(body.error.code).toBe("tools_not_supported");
+    });
+
+    it("should reject n > 1 with 400 unsupported_feature", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/v1/chat/completions",
+        payload: {
+          model: "gemini-web",
+          messages: [{ role: "user", content: "Hello" }],
+          n: 2,
+        },
+      });
+
+      expect(res.statusCode).toBe(400);
+      const body = JSON.parse(res.body);
+      expect(body.error.type).toBe("unsupported_feature");
+      expect(body.error.code).toBe("unsupported_parameter");
+    });
+
     it("should reject missing messages array with 400 invalid_request", async () => {
       const res = await app.inject({
         method: "POST",
