@@ -41,7 +41,7 @@ export class GatewayError extends Error {
     supported = "gemini-web"
   ): GatewayError {
     return new GatewayError(
-      `Model '${model}' is not supported. Supported model is '${supported}'.`,
+      `Model '${model}' is not supported. Supported models are: ${supported}.`,
       "unsupported_model",
       400,
       "unsupported_model"
@@ -112,7 +112,17 @@ export class GatewayError extends Error {
       message,
       "temporary_chat_failed",
       502,
-      "gemini_temporary_chat_failed"
+      "temporary_chat_failed"
+    );
+  }
+
+  public static workerNotConnected(message?: string): GatewayError {
+    return new GatewayError(
+      message ||
+        "No ready Geminicon Extension worker is available. Please connect and verify the extension.",
+      "worker_not_connected",
+      503,
+      "worker_not_connected"
     );
   }
 

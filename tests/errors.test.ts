@@ -68,7 +68,7 @@ describe("GatewayError", () => {
     const err = GatewayError.temporaryChatFailed();
     expect(err.statusCode).toBe(502);
     expect(err.errorType).toBe("temporary_chat_failed");
-    expect(err.code).toBe("gemini_temporary_chat_failed");
+    expect(err.code).toBe("temporary_chat_failed");
   });
 
   it("should format upstreamLimit correctly with HTTP 429", () => {

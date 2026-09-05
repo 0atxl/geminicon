@@ -101,4 +101,48 @@ describe("TaskQueue", () => {
     unblockWorker();
     await Promise.all([p1, p2, p3]);
   });
+
+  it("should track isBusy and pendingCount correctly and reject items on clear()", async () => {
+    let unblock: () => void = () => {};
+    const blocker = new Promise<void>((r) => {
+      unblock = r;
+    });
+
+    const worker = vi.fn(async (task: GatewayTask): Promise<WorkerResult> => {
+      await blocker;
+      return { requestId: task.id, text: "done", latencyMs: 5 };
+    });
+
+    const queue = new TaskQueue(worker, 5);
+    expect(queue.isBusy).toBe(false);
+    expect(queue.pendingCount).toBe(0);
+
+    const taskA: GatewayTask = { id: "A", model: "gemini-web", prompt: "A", createdAt: Date.now() };
+    const taskB: GatewayTask = { id: "B", model: "gemini-web", prompt: "B", createdAt: Date.now() };
+    const taskC: GatewayTask = { id: "C", model: "gemini-web", prompt: "C", createdAt: Date.now() };
+
+    const pA = queue.enqueue(taskA);
+    const pB = queue.enqueue(taskB);
+    const pC = queue.enqueue(taskC);
+
+    expect(queue.isBusy).toBe(true);
+    expect(queue.pendingCount).toBe(2); // taskA is active, taskB and taskC are queued
+
+    // Clear queue while taskA is still in-flight
+    queue.clear();
+    expect(queue.pendingCount).toBe(0);
+
+    // Queued items should be rejected immediately
+    await expect(pB).rejects.toMatchObject({
+      errorType: "internal_error",
+    });
+    await expect(pC).rejects.toMatchObject({
+      errorType: "internal_error",
+    });
+
+    // Unblock the active worker item
+    unblock();
+    const resA = await pA;
+    expect(resA.text).toBe("done");
+  });
 });

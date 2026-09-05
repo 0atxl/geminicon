@@ -1,4 +1,4 @@
-import { OpenAIChatResponse, WorkerResult } from "../types.js";
+import { OpenAIChatResponse, SupportedModel, WorkerResult } from "../types.js";
 
 export class ResponseNormalizer {
   /**
@@ -6,7 +6,7 @@ export class ResponseNormalizer {
    */
   public static normalize(
     result: WorkerResult,
-    model = "gemini-web"
+    model: SupportedModel = "gemini-web"
   ): OpenAIChatResponse {
     return {
       id: `chatcmpl-${result.requestId}`,

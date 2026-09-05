@@ -2,6 +2,7 @@
   "name": "geminicon",
   "version": "1.0.0",
   "description": "Minimal local OpenAI-compatible gateway for Gemini Web",
+  "license": "MIT",
   "type": "module",
   "main": "dist/server.js",
   "scripts": {
@@ -12,14 +13,17 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@fastify/websocket": "^11.3.0",
     "dotenv": "^16.4.7",
     "fastify": "^5.2.1",
     "pino": "^9.6.0",
     "playwright": "^1.50.1",
+    "ws": "^8.21.3",
     "zod": "^3.24.2"
   },
   "devDependencies": {
     "@types/node": "^22.13.5",
+    "@types/ws": "^8.18.1",
     "tsx": "^4.19.3",
     "typescript": "^5.7.3",
     "vitest": "^3.0.6"

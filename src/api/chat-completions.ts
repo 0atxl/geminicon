@@ -1,17 +1,23 @@
 import { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import crypto from "crypto";
-import { GatewayTask, OpenAIMessage } from "../types.js";
+import {
+  GatewayTask,
+  isSupportedModel,
+  OpenAIMessage,
+  SUPPORTED_MODELS,
+} from "../types.js";
 import { GatewayError } from "../gateway/errors.js";
 import { RequestNormalizer } from "../gateway/request-normalizer.js";
 import { ResponseNormalizer } from "../gateway/response-normalizer.js";
 import { TaskQueue } from "../queue/task-queue.js";
+import { ExtensionHub } from "../hub/extension-hub.js";
 import { config } from "../config.js";
 
 const chatCompletionSchema = z.object({
   model: z.string({
     required_error: "Missing required parameter 'model'.",
-  }),
+  }).max(128),
   messages: z
     .array(
       z.object({
@@ -23,23 +29,28 @@ const chatCompletionSchema = z.object({
         content: z.string({
           required_error: "Message 'content' must be a plain string.",
           invalid_type_error: "Message 'content' must be a plain string. Multimodal formats are not supported in V1.",
-        }),
-        name: z.string().optional(),
+        }).max(1_000_000),
+        name: z.string().max(128).optional(),
       }),
       {
         required_error: "Missing required parameter 'messages'.",
       }
     )
-    .min(1, "The 'messages' array cannot be empty."),
+    .min(1, "The 'messages' array cannot be empty.")
+    .max(64, "The 'messages' array is too large."),
   stream: z.boolean().optional(),
   temperature: z.number().optional(),
   top_p: z.number().optional(),
   max_tokens: z.number().optional(),
   n: z.number().optional(),
+  user: z.string().max(128).optional(),
 });
 
+const sessionIdSchema = z.string().min(1).max(128).regex(/^[A-Za-z0-9._:-]+$/);
+
 export const registerChatCompletionsRoute = (
-  taskQueue: TaskQueue
+  localTaskQueue?: TaskQueue,
+  extensionHub?: ExtensionHub
 ): FastifyPluginAsync => {
   return async (fastify) => {
     fastify.post("/v1/chat/completions", async (request, reply) => {
@@ -73,9 +84,12 @@ export const registerChatCompletionsRoute = (
 
       const body = parseResult.data;
 
-      // 3. Validate model
-      if (body.model !== "gemini-web") {
-        throw GatewayError.unsupportedModel(body.model);
+      // 3. Accept only models whose selection is positively verifiable.
+      if (!isSupportedModel(body.model)) {
+        throw GatewayError.unsupportedModel(
+          body.model,
+          SUPPORTED_MODELS.join(", ")
+        );
       }
 
       // 4. Validate stream option (must explicitly reject with streaming_not_supported)
@@ -86,31 +100,116 @@ export const registerChatCompletionsRoute = (
         );
       }
 
-      // 5. Normalize prompt
+      // 5. Extract pairing key for multi-user routing
+      let pairingKey: string | undefined;
+      const authHeader = request.headers["authorization"];
+      if (authHeader && authHeader.startsWith("Bearer ")) {
+        const token = authHeader.slice(7).trim();
+        // Ignore dummy keys like 'local' or 'none'
+        if (token && token !== "local" && token !== "none") {
+          pairingKey = token;
+        }
+      }
+
+      if (!pairingKey && request.headers["x-pairing-key"]) {
+        pairingKey = String(request.headers["x-pairing-key"]).trim();
+      }
+      if (pairingKey && pairingKey.length > 512) {
+        throw GatewayError.invalidRequest("Invalid device credential.");
+      }
+
+      // 6. Extract session options
+      const sessionCandidate =
+        request.headers["x-session-id"] || rawBody.session_id;
+      const parsedSession = sessionCandidate === undefined
+        ? undefined
+        : sessionIdSchema.safeParse(sessionCandidate);
+      if (parsedSession && !parsedSession.success) {
+        throw GatewayError.invalidRequest("Invalid session ID.");
+      }
+      const sessionId = parsedSession?.data;
+
+      const resetSession =
+        request.headers["x-reset-session"] === "true" ||
+        rawBody.reset_session === true;
+
+      // 7. Determine target execution queue
+      let targetQueue: TaskQueue | undefined;
+
+      if (localTaskQueue) {
+        targetQueue = localTaskQueue;
+      } else if (pairingKey && extensionHub) {
+        if (!extensionHub.hasWorker(pairingKey)) {
+          throw GatewayError.workerNotConnected();
+        }
+        targetQueue = extensionHub.getUserQueue(pairingKey);
+      } else if (extensionHub && extensionHub.getConnectedWorkerCount() > 0) {
+        throw GatewayError.invalidRequest(
+          "Multiple users configured. Please provide your pairing key via 'Authorization: Bearer <key>' or 'X-Pairing-Key: <key>'."
+        );
+      } else {
+        throw GatewayError.workerNotConnected(
+          "No local browser or extension worker is connected to process requests."
+        );
+      }
+
+      // 8. Normalize prompt
       const prompt = RequestNormalizer.normalize(
         body.messages as OpenAIMessage[]
       );
+      if (Buffer.byteLength(prompt, "utf8") > 1_000_000) {
+        throw GatewayError.invalidRequest("Normalized prompt is too large.");
+      }
 
-      // 6. Create internal task
+      // 9. Create internal task
       const task: GatewayTask = {
         id: requestId,
-        model: "gemini-web",
+        model: body.model,
         prompt,
         createdAt: startTime,
+        sessionId,
+        resetSession,
       };
 
       if (config.logContent) {
-        fastify.log.info({ requestId, prompt }, "Submitting prompt to queue");
+        fastify.log.info(
+          { requestId, prompt },
+          "Submitting prompt to queue"
+        );
       } else {
         fastify.log.info({ requestId }, "Request queued");
       }
 
-      // 7. Enqueue task for sequential execution
-      const workerResult = await taskQueue.enqueue(task);
+      // Fastify's signal is aborted only for an actual client disconnect. A
+      // normal IncomingMessage 'close' also fires after successful requests.
+      const onRequestAbort = () => {
+        if (pairingKey && extensionHub) {
+          extensionHub.cancelTask(pairingKey, requestId);
+        }
+        if (localTaskQueue) {
+          localTaskQueue.cancelQueued(
+            requestId,
+            GatewayError.internalError("Client disconnected.")
+          );
+        }
+      };
+      request.signal.addEventListener("abort", onRequestAbort, { once: true });
+
+      // 10. Enqueue task for sequential execution in user's queue
+      let workerResult;
+      try {
+        workerResult = await targetQueue.enqueue(task);
+      } finally {
+        request.signal.removeEventListener("abort", onRequestAbort);
+      }
 
       if (config.logContent) {
         fastify.log.info(
-          { requestId, latencyMs: workerResult.latencyMs, response: workerResult.text },
+          {
+            requestId,
+            latencyMs: workerResult.latencyMs,
+            response: workerResult.text,
+          },
           "Generation completed"
         );
       } else {
@@ -120,8 +219,8 @@ export const registerChatCompletionsRoute = (
         );
       }
 
-      // 8. Format OpenAI-compatible response
-      const response = ResponseNormalizer.normalize(workerResult);
+      // 11. Format OpenAI-compatible response
+      const response = ResponseNormalizer.normalize(workerResult, task.model);
 
       return reply.code(200).send(response);
     });

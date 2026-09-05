@@ -1,94 +1,146 @@
 # geminicon
 
-A minimal local gateway that wraps your authenticated Google Gemini Web session in a standard OpenAI-compatible Chat Completions HTTP endpoint.
+A minimal local and multi-user gateway that wraps Google Gemini Web in a standard OpenAI-compatible Chat Completions HTTP endpoint.
 
-Every request runs inside a fresh **Temporary Chat** on Gemini Web—meaning zero chats saved to your account history and zero state leak between requests.
+Requests without an explicit session ID run inside a fresh **Temporary Chat**. Reusing the same explicit session ID is the only context-preserving path.
 
 ```text
 Client / RAG / Chatbot
         │  POST /v1/chat/completions
         ▼
-Fastify Gateway (FIFO Queue, concurrency = 1)
-        │
-        ▼
-Playwright Chromium (Persistent Google Profile)
-        │
-        ▼
-gemini.google.com/app (Temporary Chat)
-        │
+Fastify Gateway Hub (WebSocket Relay + Isolated Per-User FIFO Queues)
+        ├── Route A: Local Playwright Chromium (Single-user standalone mode)
+        └── Route B: Geminicon Chrome Extension (Multi-user team mode)
+                     └── Silent background tab in team member's browser
         ▼
 OpenAI-compatible JSON response
 ```
 
 ---
 
-## Quickstart
+## Operating Modes
 
-### 1. Install
+`geminicon` supports two operating modes:
+
+1. **Standalone Local Mode**: Uses local Playwright Chromium with your own profile (`./browser-data/profile`).
+2. **Hub Mode**: Accepts outbound extension WebSockets and routes sequential work to a dedicated managed Gemini tab per extension.
+
+> **Security status:** the current shared development credential is not an authenticated device-pairing flow and is not suitable for an Internet-exposed service.
+
+---
+
+## Hub Development Setup (Chrome Extension)
+
+### 1. Run the Gateway Server
 ```bash
 npm install
-npx playwright install chromium
+npm run build
+GEMINICON_MODE=hub npm start
+```
+Loopback development API: `http://127.0.0.1:8765`
+Loopback development WebSocket: `ws://127.0.0.1:8765/ws`
+
+A non-loopback hub should set an HTTPS public URL, for example:
+
+```bash
+GEMINICON_MODE=hub HOST=0.0.0.0 \
+  GEMINICON_PUBLIC_URL=https://gateway.example.com npm start
 ```
 
-### 2. First-time Login (One-Time)
-Run the browser with a visible window to log into your Google Account:
+The public WebSocket endpoint is `wss://gateway.example.com/ws`; terminate TLS at a trusted reverse proxy if the Node process does not terminate TLS itself.
 
+### 2. Install Extension on Team Laptops (30 seconds)
+1. Open Google Chrome $\rightarrow$ navigate to `chrome://extensions/`.
+2. Enable **Developer mode** (toggle in top right).
+3. Click **"Load unpacked"** $\rightarrow$ select the `extension/` folder from this repository.
+4. Click the **Geminicon** extension icon in your Chrome toolbar:
+   * **Server URL**: Your gateway address (e.g. `http://127.0.0.1:8765` or `https://gateway.myteam.internal`)
+   * **Development credential**: any non-empty value works for local development; this is temporary development behavior, not public pairing.
+   * Click **Connect**. The status becomes **Connected** only after registration, authentication, content-script, and Temporary Chat readiness checks succeed.
+
+Prompts execute in silent background pinned tabs without stealing focus or interrupting the user.
+
+---
+
+## Standalone Local Setup (Without Extension)
+
+### 1. One-time Login
 ```bash
 HEADLESS=false npm start
 ```
+Log into your Google account at `https://gemini.google.com/app`. Press `Ctrl+C` once the chat interface is visible.
 
-Log into Gemini at `https://gemini.google.com/app`. Once the chat UI is visible, press `Ctrl+C` to stop. Your session cookies and tokens are stored in `./browser-data/profile`.
-
-### 3. Run in Background
+### 2. Start Headless
 ```bash
 npm start
 ```
-
-Default address: `http://127.0.0.1:8765`
 
 ---
 
 ## Usage
 
-### cURL
+### Hub Development Request
+Pass the same development credential in an HTTP header. Credentials in query strings are forbidden.
+
 ```bash
-curl http://127.0.0.1:8765/v1/chat/completions \
+curl https://gateway.example.com/v1/chat/completions \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $GEMINICON_DEV_CREDENTIAL" \
   -d '{
     "model": "gemini-web",
     "messages": [
-      { "role": "system", "content": "Answer concisely." },
       { "role": "user", "content": "What is TCP congestion control?" }
     ]
   }'
 ```
 
-### Python (OpenAI SDK)
-```python
-from openai import OpenAI
+### Model Selection
+The API exposes only `gemini-web`; the extension does not automate Gemini's model picker.
 
-client = OpenAI(
-    base_url="http://127.0.0.1:8765/v1",
-    api_key="local"  # Dummy key, required by SDK
-)
-
-response = client.chat.completions.create(
-    model="gemini-web",
-    messages=[
-        {"role": "user", "content": "Explain Kubernetes pods in two sentences."}
-    ]
-)
-
-print(response.choices[0].message.content)
+```bash
+curl https://gateway.example.com/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $GEMINICON_DEV_CREDENTIAL" \
+  -d '{
+    "model": "gemini-web",
+    "messages": [{ "role": "user", "content": "Write a distributed systems architecture plan." }]
+  }'
 ```
+
+### Multi-Turn Sessions within Temporary Chat
+By default, each request starts a fresh Temporary Chat. To maintain conversational memory across turns without saving anything to your Google account sidebar, pass an `X-Session-ID`:
+
+```bash
+# Turn 1
+curl https://gateway.example.com/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $GEMINICON_DEV_CREDENTIAL" \
+  -H "X-Session-ID: session_abc123" \
+  -d '{
+    "model": "gemini-web",
+    "messages": [{ "role": "user", "content": "My favorite color is teal." }]
+  }'
+
+# Turn 2 (re-uses the existing Temporary Chat tab instantly)
+curl https://gateway.example.com/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $GEMINICON_DEV_CREDENTIAL" \
+  -H "X-Session-ID: session_abc123" \
+  -d '{
+    "model": "gemini-web",
+    "messages": [{ "role": "user", "content": "What is my favorite color?" }]
+  }'
+```
+To force a fresh conversation, omit `X-Session-ID` or send `-H "X-Reset-Session: true"`.
 
 ---
 
 ## Endpoints
 
-* `POST /v1/chat/completions` — OpenAI Chat Completions endpoint (`model: "gemini-web"`, text only, non-streaming).
-* `GET /v1/models` — Returns `{ "object": "list", "data": [{ "id": "gemini-web" }] }`.
-* `GET /health` — Returns `{ "status": "ok", "browser": "ready", "gemini": "ready" }`.
+* `POST /v1/chat/completions` — OpenAI Chat Completions endpoint.
+* `GET /v1/models` — Returns verified public models (currently `gemini-web`).
+* `GET /health` — Distinguishes connected workers from ready workers.
+* `GET /ws` — WebSocket endpoint. Registration credentials are sent only in a validated protocol message, never in the URL.
 
 ---
 
@@ -96,18 +148,20 @@ print(response.choices[0].message.content)
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
+| `GEMINICON_MODE` | `local` | Explicitly select `local` or `hub` |
 | `HOST` | `127.0.0.1` | Bind address |
 | `PORT` | `8765` | Server port |
-| `HEADLESS` | `true` | Set `false` to see browser interactions |
-| `BROWSER_PROFILE_PATH` | `./browser-data/profile` | Chromium profile directory |
+| `GEMINICON_ALLOW_PUBLIC_LOCAL` | `false` | Acknowledges the warning for a non-loopback local-mode bind |
+| `GEMINICON_PUBLIC_URL` | unset | External hub URL; use HTTPS outside local development |
+| `GEMINICON_ALLOW_INSECURE_HUB` | `false` | Allow an HTTP public URL only for explicit local development |
+| `HEADLESS` | `true` | Set `false` for standalone browser debugging |
+| `BROWSER_PROFILE_PATH` | `./browser-data/profile` | Standalone Chromium profile |
 | `GENERATION_TIMEOUT_MS` | `180000` | Max wait time for response (ms) |
-| `QUEUE_MAX_SIZE` | `20` | Max queued requests before returning 429 |
-| `LOG_CONTENT` | `false` | Set `true` to log prompt/response text in console |
+| `QUEUE_MAX_SIZE` | `20` | Max queue depth per user |
+| `LOG_CONTENT` | `false` | Log prompt/response text in console |
 
----
+Hub mode never constructs or launches Playwright and never falls back to the server operator's Google account. Local mode defaults to loopback and warns when bound publicly without an acknowledgement flag.
 
-## Limitations
+## Verification limitation
 
-* **Sequential execution (`concurrency: 1`)**: Single browser context processes one request at a time.
-* **DOM dependent**: Selector adjustments in `src/providers/gemini-web/selectors.ts` may be needed if Google updates the Gemini web UI.
-* **No streaming / tools in V1**: Text completions only.
+The automated extension harness exercises protocol validation, session isolation, cancellation, and managed-tab recovery using mocked Chrome/DOM APIs. Selector compatibility, authentication detection, Temporary Chat activation, and stop-generation behavior still require a live Chrome + Gemini Web verification pass before deployment.

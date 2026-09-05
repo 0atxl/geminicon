@@ -64,6 +64,14 @@ export class TaskQueue {
     return this.active;
   }
 
+  public cancelQueued(taskId: string, error: GatewayError): boolean {
+    const index = this.queue.findIndex((item) => item.task.id === taskId);
+    if (index === -1) return false;
+    const [item] = this.queue.splice(index, 1);
+    item.reject(error);
+    return true;
+  }
+
   public clear(): void {
     const error = GatewayError.internalError("Task queue was cleared.");
     while (this.queue.length > 0) {

@@ -27,5 +27,31 @@ describe("ResponseNormalizer", () => {
         },
       ],
     });
+    expect(response.created).toBeGreaterThan(1700000000);
+  });
+
+  it("should handle empty string response gracefully", () => {
+    const workerResult = {
+      requestId: "req_empty",
+      text: "",
+      latencyMs: 100,
+    };
+
+    const response = ResponseNormalizer.normalize(workerResult, "gemini-web");
+    expect(response.choices[0].message.content).toBe("");
+    expect(response.model).toBe("gemini-web");
+  });
+
+  it("should handle multiline, codeblocks, and unicode characters correctly", () => {
+    const complexText = "```json\n{\"key\": \"🚀 value \u00A9 2026\"}\n```\n\n- Point 1\n- Point 2";
+    const workerResult = {
+      requestId: "req_unicode",
+      text: complexText,
+      latencyMs: 500,
+    };
+
+    const response = ResponseNormalizer.normalize(workerResult, "gemini-web");
+    expect(response.choices[0].message.content).toBe(complexText);
+    expect(response.model).toBe("gemini-web");
   });
 });

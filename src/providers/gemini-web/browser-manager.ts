@@ -9,7 +9,7 @@ export class BrowserManager {
   private config: GatewayConfig;
   private context: BrowserContext | null = null;
   private page: Page | null = null;
-  private isLaunching = false;
+  private launchPromise: Promise<void> | null = null;
 
   constructor(config: GatewayConfig) {
     this.config = config;
@@ -23,48 +23,47 @@ export class BrowserManager {
       return;
     }
 
-    if (this.isLaunching) {
-      while (this.isLaunching) {
-        await new Promise((r) => setTimeout(r, 100));
-      }
-      return;
+    if (this.launchPromise) {
+      return this.launchPromise;
     }
 
-    this.isLaunching = true;
-
-    try {
-      if (!fs.existsSync(this.config.browserProfilePath)) {
-        fs.mkdirSync(this.config.browserProfilePath, { recursive: true });
-      }
-
-      this.context = await chromium.launchPersistentContext(
-        this.config.browserProfilePath,
-        {
-          headless: this.config.headless,
-          viewport: { width: 1280, height: 800 },
+    this.launchPromise = (async () => {
+      try {
+        if (!fs.existsSync(this.config.browserProfilePath)) {
+          fs.mkdirSync(this.config.browserProfilePath, { recursive: true });
         }
-      );
 
-      this.context.on("close", () => {
+        this.context = await chromium.launchPersistentContext(
+          this.config.browserProfilePath,
+          {
+            headless: this.config.headless,
+            viewport: { width: 1280, height: 800 },
+          }
+        );
+
+        this.context.on("close", () => {
+          this.context = null;
+          this.page = null;
+        });
+
+        const pages = this.context.pages();
+        this.page = pages.length > 0 ? pages[0] : await this.context.newPage();
+
+        this.page.on("close", () => {
+          this.page = null;
+        });
+      } catch (err: any) {
         this.context = null;
         this.page = null;
-      });
+        throw GatewayError.browserUnavailable(
+          `Failed to launch Playwright browser: ${err.message}`
+        );
+      }
+    })().finally(() => {
+      this.launchPromise = null;
+    });
 
-      const pages = this.context.pages();
-      this.page = pages.length > 0 ? pages[0] : await this.context.newPage();
-
-      this.page.on("close", () => {
-        this.page = null;
-      });
-    } catch (err: any) {
-      this.context = null;
-      this.page = null;
-      throw GatewayError.browserUnavailable(
-        `Failed to launch Playwright browser: ${err.message}`
-      );
-    } finally {
-      this.isLaunching = false;
-    }
+    return this.launchPromise;
   }
 
   /**
@@ -135,13 +134,5 @@ export class BrowserManager {
       this.context = null;
       this.page = null;
     }
-  }
-
-  /**
-   * Restarts the browser context after an unexpected failure.
-   */
-  public async restart(): Promise<void> {
-    await this.close();
-    await this.launch();
   }
 }

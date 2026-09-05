@@ -4,12 +4,14 @@ import { registerChatCompletionsRoute } from "../src/api/chat-completions.js";
 import { registerModelsRoute } from "../src/api/models.js";
 import { registerHealthRoute } from "../src/api/health.js";
 import { TaskQueue } from "../src/queue/task-queue.js";
+import { ExtensionHub } from "../src/hub/extension-hub.js";
 import { GatewayError } from "../src/gateway/errors.js";
 
 describe("API Endpoints", () => {
   let app: FastifyInstance;
   let mockWorker: ReturnType<typeof vi.fn>;
   let mockBrowserManager: any;
+  let extensionHub: ExtensionHub;
 
   beforeEach(async () => {
     app = Fastify();
@@ -55,6 +57,7 @@ describe("API Endpoints", () => {
     }));
 
     const taskQueue = new TaskQueue(mockWorker, 10);
+    extensionHub = new ExtensionHub(10, 5000);
 
     mockBrowserManager = {
       checkHealth: vi.fn(async () => ({
@@ -63,14 +66,14 @@ describe("API Endpoints", () => {
       })),
     };
 
-    await app.register(registerChatCompletionsRoute(taskQueue));
+    await app.register(registerChatCompletionsRoute(taskQueue, extensionHub));
     await app.register(registerModelsRoute);
-    await app.register(registerHealthRoute(mockBrowserManager));
+    await app.register(registerHealthRoute(mockBrowserManager, extensionHub));
     await app.ready();
   });
 
   describe("GET /v1/models", () => {
-    it("should return only gemini-web model", async () => {
+    it("should expose only the model whose selection can be verified", async () => {
       const res = await app.inject({
         method: "GET",
         url: "/v1/models",
@@ -104,6 +107,8 @@ describe("API Endpoints", () => {
         status: "ok",
         browser: "ready",
         gemini: "ready",
+        connectedWorkers: 0,
+        readyWorkers: 0,
       });
     });
 
@@ -124,6 +129,8 @@ describe("API Endpoints", () => {
         status: "degraded",
         browser: "ready",
         gemini: "authentication_required",
+        connectedWorkers: 0,
+        readyWorkers: 0,
       });
     });
 
@@ -144,6 +151,8 @@ describe("API Endpoints", () => {
         status: "degraded",
         browser: "ready",
         gemini: "unavailable",
+        connectedWorkers: 0,
+        readyWorkers: 0,
       });
     });
 
@@ -164,7 +173,39 @@ describe("API Endpoints", () => {
         status: "error",
         browser: "unavailable",
         gemini: "unknown",
+        connectedWorkers: 0,
+        readyWorkers: 0,
       });
+    });
+
+    it("should return 200 ok when local browser is down but an extension worker is ready", async () => {
+      mockBrowserManager.checkHealth.mockResolvedValueOnce({
+        browser: "unavailable",
+        gemini: "unknown",
+      });
+
+      // Mock connected worker
+      (extensionHub as any).workers.set("w1", {
+        ws: { readyState: 1 },
+        key: "w1",
+        connectedAt: Date.now(),
+        lastHeartbeat: Date.now(),
+        pendingTasks: new Map(),
+        state: "ready",
+      });
+
+      const res = await app.inject({
+        method: "GET",
+        url: "/health",
+      });
+
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.body);
+      expect(body.status).toBe("ok");
+      expect(body.browser).toBe("unavailable"); // Honestly reports local browser state!
+      expect(body.connectedWorkers).toBe(1);
+      expect(body.readyWorkers).toBe(1);
+      (extensionHub as any).workers.delete("w1");
     });
   });
 
@@ -188,6 +229,21 @@ describe("API Endpoints", () => {
       expect(body.choices[0].message.role).toBe("assistant");
       expect(body.choices[0].message.content).toContain("What is a Kubernetes pod?");
       expect(mockWorker).toHaveBeenCalledTimes(1);
+    });
+
+    it("should reject unverified named Gemini modes", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/v1/chat/completions",
+        payload: {
+          model: "gemini-flash",
+          messages: [{ role: "user", content: "Hello Flash" }],
+        },
+      });
+
+      expect(res.statusCode).toBe(400);
+      const body = JSON.parse(res.body);
+      expect(body.error.type).toBe("unsupported_model");
     });
 
     it("should reject unsupported model with 400 unsupported_model", async () => {
@@ -284,6 +340,91 @@ describe("API Endpoints", () => {
       expect(res.statusCode).toBe(400);
       const body = JSON.parse(res.body);
       expect(body.error.type).toBe("invalid_request");
+    });
+
+    it("should return 503 worker_not_connected when pairing key is not connected", async () => {
+      const hubOnlyApp = Fastify();
+      hubOnlyApp.setErrorHandler((error, _request, reply) => {
+        if (error instanceof GatewayError) {
+          return reply.code(error.statusCode).send(error.toPayload());
+        }
+        return reply.code(500).send({ error: { message: "internal" } });
+      });
+      await hubOnlyApp.register(
+        registerChatCompletionsRoute(undefined, extensionHub)
+      );
+      const res = await hubOnlyApp.inject({
+        method: "POST",
+        url: "/v1/chat/completions",
+        headers: {
+          authorization: "Bearer gcon_alice_not_connected",
+        },
+        payload: {
+          model: "gemini-web",
+          messages: [{ role: "user", content: "Hello" }],
+        },
+      });
+
+      expect(res.statusCode).toBe(503);
+      const body = JSON.parse(res.body);
+      expect(body.error.type).toBe("worker_not_connected");
+      expect(res.body).not.toContain("gcon_alice_not_connected");
+      await hubOnlyApp.close();
+    });
+
+    it("should pass session ID and reset session flag to gateway task", async () => {
+      const res = await app.inject({
+        method: "POST",
+        url: "/v1/chat/completions",
+        headers: {
+          "x-session-id": "sess_audit_test",
+          "x-reset-session": "true",
+        },
+        payload: {
+          model: "gemini-web",
+          messages: [{ role: "user", content: "Hello multi-turn" }],
+        },
+      });
+
+      expect(res.statusCode).toBe(200);
+      expect(mockWorker).toHaveBeenCalledTimes(1);
+      const submittedTask = mockWorker.mock.calls[0][0];
+      expect(submittedTask.sessionId).toBe("sess_audit_test");
+      expect(submittedTask.resetSession).toBe(true);
+    });
+
+    it("should reject request when multiple workers connected but no pairing key provided and no local queue", async () => {
+      const multiApp = Fastify();
+      multiApp.setErrorHandler((error, request, reply) => {
+        if (error instanceof GatewayError) {
+          return reply.code(error.statusCode).send(error.toPayload());
+        }
+        return reply.code(500).send({ error: { message: (error as any).message } });
+      });
+
+      const hub = new ExtensionHub(10, 5000);
+      (hub as any).workers.set("worker1", {
+        ws: { readyState: 1, close: vi.fn() },
+        key: "worker1",
+        connectedAt: Date.now(),
+        lastHeartbeat: Date.now(),
+        state: "connected_not_ready",
+      });
+
+      await multiApp.register(registerChatCompletionsRoute(undefined, hub));
+      const res = await multiApp.inject({
+        method: "POST",
+        url: "/v1/chat/completions",
+        payload: {
+          model: "gemini-web",
+          messages: [{ role: "user", content: "Hello" }],
+        },
+      });
+
+      expect(res.statusCode).toBe(400);
+      const body = JSON.parse(res.body);
+      expect(body.error.message).toContain("Multiple users configured");
+      await hub.close();
     });
 
     it("should return 404 for unknown endpoint", async () => {

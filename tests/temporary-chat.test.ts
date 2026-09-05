@@ -143,4 +143,94 @@ describe("Temporary Chat Logic", () => {
       expect(mockFill).not.toHaveBeenCalled();
     });
   });
+
+  describe("GeminiWorker session management", () => {
+    it("starts fresh temporary chat on first call, reuses on same sessionId, resets on new or reset session", async () => {
+      const { GeminiWorker } = await import(
+        "../src/providers/gemini-web/gemini-worker.js"
+      );
+
+      const mockPage: any = {};
+      const mockBrowserManager: any = {
+        getPage: vi.fn().mockResolvedValue(mockPage),
+      };
+      const mockConfig: any = {
+        generationTimeoutMs: 5000,
+      };
+
+      const ensureReadySpy = vi
+        .spyOn(GeminiPage, "ensureReady")
+        .mockResolvedValue(undefined);
+      const startTempChatSpy = vi
+        .spyOn(GeminiPage, "startTemporaryChat")
+        .mockResolvedValue(undefined);
+      const isTempChatActiveSpy = vi
+        .spyOn(GeminiPage, "isTemporaryChatActive")
+        .mockResolvedValue(true);
+      const submitPromptSpy = vi
+        .spyOn(GeminiPage, "submitPrompt")
+        .mockResolvedValue(1);
+      const waitAndExtractSpy = vi
+        .spyOn(GeminiPage, "waitForCompletionAndExtract")
+        .mockResolvedValue("Response text");
+
+      const worker = new GeminiWorker(mockBrowserManager, mockConfig);
+
+      // 1. First request with sessionId 'sess_1' -> must start temporary chat
+      await worker.execute({
+        id: "req_1",
+        model: "gemini-web",
+        prompt: "First turn",
+        createdAt: Date.now(),
+        sessionId: "sess_1",
+      });
+      expect(startTempChatSpy).toHaveBeenCalledTimes(1);
+
+      // 2. Second request with same sessionId 'sess_1' -> should REUSE (no new startTemporaryChat)
+      await worker.execute({
+        id: "req_2",
+        model: "gemini-web",
+        prompt: "Second turn",
+        createdAt: Date.now(),
+        sessionId: "sess_1",
+      });
+      expect(startTempChatSpy).toHaveBeenCalledTimes(1); // still 1
+
+      // 3. Third request with resetSession: true -> must start fresh temporary chat
+      await worker.execute({
+        id: "req_3",
+        model: "gemini-web",
+        prompt: "Reset turn",
+        createdAt: Date.now(),
+        sessionId: "sess_1",
+        resetSession: true,
+      });
+      expect(startTempChatSpy).toHaveBeenCalledTimes(2);
+
+      // 4. Fourth request with different sessionId 'sess_2' -> must start fresh temporary chat
+      await worker.execute({
+        id: "req_4",
+        model: "gemini-web",
+        prompt: "New session turn",
+        createdAt: Date.now(),
+        sessionId: "sess_2",
+      });
+      expect(startTempChatSpy).toHaveBeenCalledTimes(3);
+
+      // 5. Fifth request without any sessionId -> must start fresh temporary chat
+      await worker.execute({
+        id: "req_5",
+        model: "gemini-web",
+        prompt: "Stateless turn",
+        createdAt: Date.now(),
+      });
+      expect(startTempChatSpy).toHaveBeenCalledTimes(4);
+
+      ensureReadySpy.mockRestore();
+      startTempChatSpy.mockRestore();
+      isTempChatActiveSpy.mockRestore();
+      submitPromptSpy.mockRestore();
+      waitAndExtractSpy.mockRestore();
+    });
+  });
 });

@@ -2,7 +2,7 @@ import { FastifyPluginAsync } from "fastify";
 import { ModelsResponse } from "../types.js";
 
 export const registerModelsRoute: FastifyPluginAsync = async (fastify) => {
-  fastify.get("/v1/models", async (request, reply) => {
+  fastify.get("/v1/models", async (_request, reply) => {
     const response: ModelsResponse = {
       object: "list",
       data: [

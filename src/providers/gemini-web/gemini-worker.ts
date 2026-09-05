@@ -7,6 +7,7 @@ import { GatewayError } from "../../gateway/errors.js";
 export class GeminiWorker {
   private browserManager: BrowserManager;
   private config: GatewayConfig;
+  private lastSessionId: string | undefined;
 
   constructor(browserManager: BrowserManager, config: GatewayConfig) {
     this.browserManager = browserManager;
@@ -15,6 +16,8 @@ export class GeminiWorker {
 
   /**
    * Executes a single inference task against Gemini Web via Temporary Chat.
+   * Respects task.sessionId and task.resetSession to support multi-turn
+   * conversations within the same Temporary Chat tab.
    */
   public async execute(task: GatewayTask): Promise<WorkerResult> {
     const startTime = Date.now();
@@ -22,10 +25,17 @@ export class GeminiWorker {
 
     // 1. Ensure Gemini Web page is ready & authenticated
     await GeminiPage.ensureReady(page);
-    await GeminiPage.ensureAuthenticated(page);
 
-    // 2. Start fresh Temporary Chat per API request (never normal chat)
-    await GeminiPage.startTemporaryChat(page);
+    // 2. Determine whether to start a fresh Temporary Chat or reuse the
+    //    existing one for multi-turn session continuity.
+    const shouldReset =
+      !task.sessionId ||
+      task.resetSession === true ||
+      task.sessionId !== this.lastSessionId;
+
+    if (shouldReset) {
+      await GeminiPage.startTemporaryChat(page);
+    }
 
     if (!(await GeminiPage.isTemporaryChatActive(page))) {
       throw GatewayError.temporaryChatFailed();
@@ -45,6 +55,9 @@ export class GeminiWorker {
     );
 
     const latencyMs = Date.now() - startTime;
+
+    // Track session for multi-turn reuse
+    this.lastSessionId = task.sessionId;
 
     return {
       requestId: task.id,
