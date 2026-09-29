@@ -36,6 +36,13 @@ export class GatewayError extends Error {
     return new GatewayError(message, "invalid_request", 400, code);
   }
 
+  public static unauthorized(
+    message = "Unauthorized: Invalid or missing service key.",
+    code = "invalid_api_key"
+  ): GatewayError {
+    return new GatewayError(message, "invalid_request", 401, code);
+  }
+
   public static unsupportedModel(
     model: string,
     supported = "gemini-web"

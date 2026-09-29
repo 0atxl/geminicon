@@ -50,7 +50,8 @@ const sessionIdSchema = z.string().min(1).max(128).regex(/^[A-Za-z0-9._:-]+$/);
 
 export const registerChatCompletionsRoute = (
   localTaskQueue?: TaskQueue,
-  extensionHub?: ExtensionHub
+  extensionHub?: ExtensionHub,
+  serviceKey?: string
 ): FastifyPluginAsync => {
   return async (fastify) => {
     fastify.post("/v1/chat/completions", async (request, reply) => {
@@ -100,25 +101,43 @@ export const registerChatCompletionsRoute = (
         );
       }
 
-      // 5. Extract pairing key for multi-user routing
-      let pairingKey: string | undefined;
+      // 5. Authentication & Service Key Validation
       const authHeader = request.headers["authorization"];
+      let bearerToken: string | undefined;
       if (authHeader && authHeader.startsWith("Bearer ")) {
-        const token = authHeader.slice(7).trim();
-        // Ignore dummy keys like 'local' or 'none'
-        if (token && token !== "local" && token !== "none") {
-          pairingKey = token;
+        bearerToken = authHeader.slice(7).trim();
+      }
+
+      // The device token must NOT authorize generation API calls
+      if (bearerToken && bearerToken.startsWith("gcon_dev_")) {
+        throw GatewayError.unauthorized(
+          "Device tokens cannot authorize generation API calls. A service key is required.",
+          "device_token_not_allowed"
+        );
+      }
+
+      // Validate service key if configured
+      if (serviceKey) {
+        if (!bearerToken || bearerToken !== serviceKey) {
+          throw GatewayError.unauthorized(
+            "Unauthorized: Valid service key required."
+          );
         }
       }
 
-      if (!pairingKey && request.headers["x-pairing-key"]) {
-        pairingKey = String(request.headers["x-pairing-key"]).trim();
-      }
-      if (pairingKey && pairingKey.length > 512) {
-        throw GatewayError.invalidRequest("Invalid device credential.");
+      // 6. Extract User ID for routing
+      const userHeader =
+        request.headers["x-geminicon-user-id"] ||
+        request.headers["x-user-id"] ||
+        request.headers["x-pairing-key"];
+      let targetUserId = userHeader ? String(userHeader).trim() : undefined;
+
+      // Backward compatibility: if no serviceKey configured and a non-dummy bearer token is passed
+      if (!targetUserId && bearerToken && !serviceKey && bearerToken !== "local" && bearerToken !== "none") {
+        targetUserId = bearerToken;
       }
 
-      // 6. Extract session options
+      // 7. Extract session options
       const sessionCandidate =
         request.headers["x-session-id"] || rawBody.session_id;
       const parsedSession = sessionCandidate === undefined
@@ -133,19 +152,19 @@ export const registerChatCompletionsRoute = (
         request.headers["x-reset-session"] === "true" ||
         rawBody.reset_session === true;
 
-      // 7. Determine target execution queue
+      // 8. Determine target execution queue
       let targetQueue: TaskQueue | undefined;
 
       if (localTaskQueue) {
         targetQueue = localTaskQueue;
-      } else if (pairingKey && extensionHub) {
-        if (!extensionHub.hasWorker(pairingKey)) {
+      } else if (targetUserId && extensionHub) {
+        if (!extensionHub.hasWorker(targetUserId)) {
           throw GatewayError.workerNotConnected();
         }
-        targetQueue = extensionHub.getUserQueue(pairingKey);
+        targetQueue = extensionHub.getUserQueue(targetUserId);
       } else if (extensionHub && extensionHub.getConnectedWorkerCount() > 0) {
         throw GatewayError.invalidRequest(
-          "Multiple users configured. Please provide your pairing key via 'Authorization: Bearer <key>' or 'X-Pairing-Key: <key>'."
+          "Multiple users configured. Please provide 'X-Geminicon-User-ID: <userId>'."
         );
       } else {
         throw GatewayError.workerNotConnected(
@@ -183,8 +202,8 @@ export const registerChatCompletionsRoute = (
       // Fastify's signal is aborted only for an actual client disconnect. A
       // normal IncomingMessage 'close' also fires after successful requests.
       const onRequestAbort = () => {
-        if (pairingKey && extensionHub) {
-          extensionHub.cancelTask(pairingKey, requestId);
+        if (targetUserId && extensionHub) {
+          extensionHub.cancelTask(targetUserId, requestId);
         }
         if (localTaskQueue) {
           localTaskQueue.cancelQueued(

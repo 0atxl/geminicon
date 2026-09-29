@@ -135,7 +135,8 @@ type ProtocolEnvelope = {
 export type WSClientMessage =
   | (ProtocolEnvelope & {
       type: "REGISTER";
-      credential: string;
+      deviceToken?: string;
+      credential?: string;
       deviceId: string;
       name?: string;
       clientVersion: string;

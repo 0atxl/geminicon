@@ -67,9 +67,14 @@ function scheduleReconnect() {
 
 async function connect() {
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
-  const settings = await chrome.storage.local.get(["serverUrl", "pairingKey", "desiredConnected"]);
+  const settings = await chrome.storage.local.get([
+    "serverUrl",
+    "deviceToken",
+    "desiredConnected",
+  ]);
   if (settings.desiredConnected !== true) return;
-  if (!settings.serverUrl || !settings.pairingKey) {
+  const token = settings.deviceToken;
+  if (!settings.serverUrl || !token) {
     await chrome.storage.local.set({ connected: false, connecting: false });
     return;
   }
@@ -88,7 +93,7 @@ async function connect() {
     ws.onopen = async () => {
       const deviceId = await getDeviceId();
       send("REGISTER", {
-        credential: settings.pairingKey,
+        deviceToken: token,
         deviceId,
         name: "Chrome Extension Worker",
         clientVersion: chrome.runtime.getManifest().version,
@@ -393,6 +398,12 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   }
   if (message.action === "DISCONNECT") {
     disconnect().then(() => sendResponse({ status: "ok" }));
+    return true;
+  }
+  if (message.action === "UNPAIR") {
+    chrome.storage.local.set({ desiredConnected: false })
+      .then(disconnect)
+      .then(() => sendResponse({ status: "ok" }));
     return true;
   }
 });

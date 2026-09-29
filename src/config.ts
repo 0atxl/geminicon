@@ -7,8 +7,10 @@ export interface GatewayConfig {
   mode: "local" | "hub";
   host: string;
   port: number;
+  serviceKey?: string;
   headless: boolean;
   browserProfilePath: string;
+  devicesPath: string;
   generationTimeoutMs: number;
   queueMaxSize: number;
   logLevel: string;
@@ -34,36 +36,42 @@ export function loadConfig(
   const allowPublicLocal = env.GEMINICON_ALLOW_PUBLIC_LOCAL === "true";
   const allowInsecureHub = env.GEMINICON_ALLOW_INSECURE_HUB === "true";
   const publicUrl = env.GEMINICON_PUBLIC_URL;
+  const serviceKey = env.GEMINICON_SERVICE_KEY?.trim() || undefined;
 
+  // Startup Safety: reject unsafe public configurations
   if (rawMode === "local" && !isLoopbackHost(host) && !allowPublicLocal) {
-    console.warn(
-      "[geminicon] Local mode is binding beyond loopback. Set GEMINICON_ALLOW_PUBLIC_LOCAL=true to acknowledge this configuration."
+    throw new Error(
+      "Refusing to start: Local Playwright mode cannot bind to a public/non-loopback host without GEMINICON_ALLOW_PUBLIC_LOCAL=true."
     );
   }
-  if (rawMode === "hub" && !isLoopbackHost(host) &&
-      (!publicUrl || !publicUrl.toLowerCase().startsWith("https://"))) {
-    console.warn(
-      "[geminicon] Non-loopback hub mode should be published behind HTTPS; set GEMINICON_PUBLIC_URL to the external URL."
-    );
-  }
-  if (
-    rawMode === "hub" &&
-    publicUrl &&
-    !publicUrl.toLowerCase().startsWith("https://") &&
-    !allowInsecureHub
-  ) {
-    console.warn(
-      "[geminicon] Hub public URL is not HTTPS. Use this only for local development or set GEMINICON_ALLOW_INSECURE_HUB=true to acknowledge it."
-    );
+
+  if (rawMode === "hub") {
+    if (!serviceKey) {
+      throw new Error(
+        "Refusing to start: Hub mode requires GEMINICON_SERVICE_KEY to be set."
+      );
+    }
+    if (
+      !isLoopbackHost(host) &&
+      (!publicUrl || !publicUrl.toLowerCase().startsWith("https://")) &&
+      !allowInsecureHub
+    ) {
+      throw new Error(
+        "Refusing to start: Hub mode on a non-loopback host must be served behind HTTPS. Set GEMINICON_PUBLIC_URL=https://... or set GEMINICON_ALLOW_INSECURE_HUB=true."
+      );
+    }
   }
 
   return {
     mode: rawMode,
     host,
     port: parseInt(env.PORT || "8765", 10),
+    serviceKey,
     headless: env.HEADLESS !== "false",
     browserProfilePath:
       env.BROWSER_PROFILE_PATH || path.resolve(cwd, "browser-data/profile"),
+    devicesPath:
+      env.GEMINICON_DEVICES_PATH || path.resolve(cwd, ".geminicon-devices.json"),
     generationTimeoutMs: parseInt(env.GENERATION_TIMEOUT_MS || "180000", 10),
     queueMaxSize: parseInt(env.QUEUE_MAX_SIZE || "20", 10),
     logLevel: env.LOG_LEVEL || "info",

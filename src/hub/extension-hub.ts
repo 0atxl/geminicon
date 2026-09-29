@@ -15,6 +15,8 @@ import {
 import { GatewayError } from "../gateway/errors.js";
 import { TaskQueue } from "../queue/task-queue.js";
 
+import { DeviceRegistry } from "./device-registry.js";
+
 const MAX_TASK_TEXT = 2 * 1024 * 1024;
 const idSchema = z.string().min(1).max(128).regex(/^[A-Za-z0-9._:-]+$/);
 const envelope = {
@@ -25,7 +27,8 @@ export const wsClientMessageSchema = z.discriminatedUnion("type", [
   z.object({
     ...envelope,
     type: z.literal("REGISTER"),
-    credential: z.string().min(1).max(512),
+    deviceToken: z.string().min(1).max(512).optional(),
+    credential: z.string().min(1).max(512).optional(),
     deviceId: idSchema,
     name: z.string().min(1).max(128).optional(),
     clientVersion: z.string().min(1).max(32),
@@ -111,7 +114,8 @@ export class ExtensionHub {
   constructor(
     private readonly queueMaxSize = 20,
     private readonly defaultTimeoutMs = 180000,
-    private readonly cancellationAckTimeoutMs = 20_000
+    private readonly cancellationAckTimeoutMs = 20_000,
+    private readonly deviceRegistry?: DeviceRegistry
   ) {
     this.sweepInterval = setInterval(() => this.sweepStaleWorkers(), 30000);
   }
@@ -145,9 +149,22 @@ export class ExtensionHub {
     return queue;
   }
 
+  public disconnectUser(userId: string): void {
+    const worker = this.workers.get(userId);
+    if (worker) {
+      this.failActive(
+        worker,
+        GatewayError.workerNotConnected("Device pairing was revoked.")
+      );
+      this.wsToKey.delete(worker.ws);
+      this.workers.delete(userId);
+      worker.ws.close(1008, "Device pairing revoked");
+    }
+  }
+
   public handleConnection(ws: WebSocket): void {
     if (this.isClosed) {
-      ws.close(1001, "Server shutting down");
+      ws.close(1001, "Gateway is shutting down");
       return;
     }
 
@@ -171,11 +188,12 @@ export class ExtensionHub {
         }
       }
     }, 25000);
+    pingInterval.unref?.();
 
-    ws.on("message", (raw: string | Buffer) => {
+    ws.on("message", (data: Buffer | string) => {
       let parsed: unknown;
       try {
-        parsed = JSON.parse(raw.toString());
+        parsed = JSON.parse(data.toString());
       } catch {
         ws.close(1007, "Invalid message");
         return;
@@ -207,10 +225,23 @@ export class ExtensionHub {
     registrationTimer.unref?.();
   }
 
-  private registerWorker(credential: string, deviceId: string, ws: WebSocket): void {
-    // Temporary credential lookup pending the durable device store. The value
-    // is deliberately never returned or logged.
-    const key = credential;
+  private registerWorker(token: string, deviceId: string, ws: WebSocket): void {
+    let key = token;
+    if (this.deviceRegistry) {
+      const validation = this.deviceRegistry.validateDeviceToken(token);
+      if (!validation.valid || !validation.userId) {
+        this.send(ws, {
+          type: "REGISTER_ACK",
+          protocolVersion: GEMINICON_PROTOCOL_VERSION,
+          status: "error",
+          message: "Device is not paired or token has been revoked.",
+        });
+        ws.close(1008, "Invalid device token");
+        return;
+      }
+      key = validation.userId;
+    }
+
     const existing = this.workers.get(key);
     if (existing && existing.ws !== ws) {
       this.failActive(
@@ -261,7 +292,8 @@ export class ExtensionHub {
         ws.close(1008, "Already registered");
         return;
       }
-      this.registerWorker(msg.credential, msg.deviceId, ws);
+      const token = msg.deviceToken || msg.credential || "";
+      this.registerWorker(token, msg.deviceId, ws);
       return;
     }
 

@@ -136,6 +136,16 @@
       background: #475569;
     }
 
+    button.danger {
+      background: rgba(239, 68, 68, 0.2);
+      color: #fca5a5;
+      border: 1px solid rgba(239, 68, 68, 0.4);
+    }
+
+    button.danger:hover {
+      background: rgba(239, 68, 68, 0.3);
+    }
+
     .stats {
       margin-top: 14px;
       padding-top: 10px;
@@ -156,6 +166,38 @@
       color: var(--text-muted);
       line-height: 1.4;
     }
+
+    .paired-info {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 10px;
+      margin-bottom: 12px;
+    }
+
+    .paired-row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 6px;
+      font-size: 12px;
+    }
+
+    .paired-row:last-child {
+      margin-bottom: 0;
+    }
+
+    .paired-label {
+      color: var(--text-muted);
+    }
+
+    .paired-val {
+      font-weight: 500;
+      color: var(--text);
+    }
+
+    .hidden {
+      display: none !important;
+    }
   </style>
 </head>
 <body>
@@ -167,17 +209,36 @@
     </div>
   </header>
 
-  <div class="form-group">
-    <label for="serverUrl">Gateway Server URL</label>
-    <input type="text" id="serverUrl" placeholder="http://127.0.0.1:8765" spellcheck="false">
+  <!-- Section 1: Before pairing -->
+  <div id="unpairedView">
+    <div class="form-group">
+      <label for="serverUrl">Gateway Server URL</label>
+      <input type="text" id="serverUrl" placeholder="http://127.0.0.1:8765" spellcheck="false">
+    </div>
+
+    <div class="form-group">
+      <label for="pairingCode">Pairing Code</label>
+      <input type="text" id="pairingCode" placeholder="PAIR-XXXX-YYYY" autocomplete="off" spellcheck="false" style="text-transform: uppercase;">
+    </div>
+
+    <button id="pairBtn">Pair Device</button>
   </div>
 
-  <div class="form-group">
-    <label for="pairingKey">Development credential</label>
-    <input type="password" id="pairingKey" autocomplete="off" spellcheck="false">
-  </div>
+  <!-- Section 2: After pairing -->
+  <div id="pairedView" class="hidden">
+    <div class="paired-info">
+      <div class="paired-row">
+        <span class="paired-label">Server:</span>
+        <span id="pairedServer" class="paired-val">http://127.0.0.1:8765</span>
+      </div>
+      <div class="paired-row">
+        <span class="paired-label">Paired User:</span>
+        <span id="pairedUser" class="paired-val">-</span>
+      </div>
+    </div>
 
-  <button id="toggleBtn">Connect</button>
+    <button id="unpairBtn" class="danger">Unpair Device</button>
+  </div>
 
   <div class="info-box">
     Ensure you are logged into <strong>gemini.google.com</strong> in this browser. Prompts execute inside silent background Temporary Chats.

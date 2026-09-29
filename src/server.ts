@@ -6,7 +6,9 @@ import { BrowserManager } from "./providers/gemini-web/browser-manager.js";
 import { GeminiWorker } from "./providers/gemini-web/gemini-worker.js";
 import { TaskQueue } from "./queue/task-queue.js";
 import { ExtensionHub } from "./hub/extension-hub.js";
+import { DeviceRegistry } from "./hub/device-registry.js";
 import { registerChatCompletionsRoute } from "./api/chat-completions.js";
+import { registerPairingRoutes } from "./api/pairing.js";
 import { registerModelsRoute } from "./api/models.js";
 import { registerHealthRoute } from "./api/health.js";
 
@@ -19,6 +21,7 @@ export async function createServer(
   browserManager?: BrowserManager;
   taskQueue?: TaskQueue;
   extensionHub: ExtensionHub;
+  deviceRegistry: DeviceRegistry;
 }> {
   const app = Fastify({
     logger: {
@@ -80,10 +83,15 @@ export async function createServer(
     });
   });
 
+  // Initialize Device Registry
+  const deviceRegistry = new DeviceRegistry(runtimeConfig.devicesPath);
+
   // Initialize Extension Hub
   const extensionHub = new ExtensionHub(
     runtimeConfig.queueMaxSize,
-    runtimeConfig.generationTimeoutMs
+    runtimeConfig.generationTimeoutMs,
+    20_000,
+    deviceRegistry
   );
 
   // Initialize Local Browser & Queue ONLY if running in 'local' mode
@@ -105,22 +113,29 @@ export async function createServer(
   });
 
   if (runtimeConfig.mode === "hub") {
-    app.get("/ws", { websocket: true }, (socket, request) => {
+    const wsHandler = (socket: any, request: any) => {
       if (request.url.includes("?")) {
         socket.close(1008, "Query parameters forbidden");
         return;
       }
       extensionHub.handleConnection(socket);
-    });
+    };
+    app.get("/ws", { websocket: true }, wsHandler);
+    app.get("/hub/ws", { websocket: true }, wsHandler);
   }
 
   // Register API Routes
   const activeHub = runtimeConfig.mode === "hub" ? extensionHub : undefined;
-  await app.register(registerChatCompletionsRoute(taskQueue, activeHub));
+  await app.register(
+    registerPairingRoutes(deviceRegistry, runtimeConfig.serviceKey, activeHub)
+  );
+  await app.register(
+    registerChatCompletionsRoute(taskQueue, activeHub, runtimeConfig.serviceKey)
+  );
   await app.register(registerModelsRoute);
   await app.register(registerHealthRoute(browserManager, activeHub));
 
-  return { app, browserManager, taskQueue, extensionHub };
+  return { app, browserManager, taskQueue, extensionHub, deviceRegistry };
 }
 
 async function main() {
