@@ -118,6 +118,22 @@ export async function createServer(
         socket.close(1008, "Query parameters forbidden");
         return;
       }
+      const origin = request.headers.origin;
+      if (origin) {
+        const isExtension = origin.startsWith("chrome-extension://");
+        const isLoopback =
+          origin.startsWith("http://127.0.0.1") ||
+          origin.startsWith("http://localhost") ||
+          origin.startsWith("https://127.0.0.1") ||
+          origin.startsWith("https://localhost");
+        const isConfiguredPublic =
+          runtimeConfig.publicUrl &&
+          origin.startsWith(runtimeConfig.publicUrl.replace(/\/+$/, ""));
+        if (!isExtension && !isLoopback && !isConfiguredPublic && !runtimeConfig.allowInsecureHub) {
+          socket.close(1008, "Forbidden origin");
+          return;
+        }
+      }
       extensionHub.handleConnection(socket);
     };
     app.get("/ws", { websocket: true }, wsHandler);
