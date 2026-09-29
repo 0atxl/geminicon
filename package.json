@@ -10,7 +10,6 @@
     "start": "tsx src/server.ts",
     "build": "tsc",
     "test": "vitest run",
-    "test:relay": "tsx scripts/verify-relay.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

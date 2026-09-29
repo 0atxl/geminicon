@@ -3,17 +3,17 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Geminicon Helper</title>
+  <title>Geminicon</title>
   <style>
     :root {
       --bg: #0f172a;
       --card-bg: #1e293b;
       --text: #f8fafc;
       --text-muted: #94a3b8;
-      --border: #334155;
       --primary: #3b82f6;
       --primary-hover: #2563eb;
-      --success: #10b981;
+      --border: #334155;
+      --success: #22c55e;
       --danger: #ef4444;
       --warning: #f59e0b;
     }
@@ -22,62 +22,62 @@
       box-sizing: border-box;
       margin: 0;
       padding: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     }
 
     body {
-      width: 320px;
       background: var(--bg);
       color: var(--text);
+      width: 320px;
       padding: 16px;
       font-size: 13px;
     }
 
     header {
       display: flex;
-      align-items: center;
       justify-content: space-between;
-      margin-bottom: 14px;
-      padding-bottom: 10px;
-      border-bottom: 1px solid var(--border);
+      align-items: center;
+      margin-bottom: 16px;
     }
 
     h1 {
-      font-size: 15px;
+      font-size: 16px;
       font-weight: 600;
-      letter-spacing: -0.3px;
-      display: flex;
-      align-items: center;
-      gap: 6px;
+      letter-spacing: -0.025em;
     }
 
     .status-badge {
-      display: inline-flex;
+      display: flex;
       align-items: center;
-      gap: 5px;
-      padding: 3px 8px;
+      gap: 6px;
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      padding: 4px 8px;
       border-radius: 9999px;
       font-size: 11px;
       font-weight: 500;
-      background: rgba(239, 68, 68, 0.15);
-      color: var(--danger);
-    }
-
-    .status-badge.connected {
-      background: rgba(16, 185, 129, 0.15);
-      color: var(--success);
-    }
-
-    .status-badge.connecting {
-      background: rgba(245, 158, 11, 0.15);
-      color: var(--warning);
     }
 
     .status-dot {
-      width: 7px;
-      height: 7px;
+      width: 8px;
+      height: 8px;
       border-radius: 50%;
-      background: currentColor;
+      background: var(--danger);
+    }
+
+    .status-badge.connected .status-dot {
+      background: var(--success);
+      box-shadow: 0 0 8px rgba(34, 197, 94, 0.4);
+    }
+
+    .status-badge.connecting .status-dot {
+      background: var(--warning);
+      animation: pulse 1s infinite alternate;
+    }
+
+    @keyframes pulse {
+      from { opacity: 0.4; }
+      to { opacity: 1; }
     }
 
     .form-group {
@@ -91,7 +91,7 @@
       color: var(--text-muted);
       margin-bottom: 4px;
       text-transform: uppercase;
-      letter-spacing: 0.5px;
+      letter-spacing: 0.05em;
     }
 
     input {
@@ -112,9 +112,9 @@
 
     button {
       width: 100%;
-      padding: 9px;
-      border-radius: 6px;
       border: none;
+      border-radius: 6px;
+      padding: 9px 0;
       font-weight: 500;
       font-size: 13px;
       cursor: pointer;
@@ -134,16 +134,6 @@
 
     button.disconnect:hover {
       background: #475569;
-    }
-
-    button.danger {
-      background: rgba(239, 68, 68, 0.2);
-      color: #fca5a5;
-      border: 1px solid rgba(239, 68, 68, 0.4);
-    }
-
-    button.danger:hover {
-      background: rgba(239, 68, 68, 0.3);
     }
 
     .stats {
@@ -166,38 +156,6 @@
       color: var(--text-muted);
       line-height: 1.4;
     }
-
-    .paired-info {
-      background: var(--card-bg);
-      border: 1px solid var(--border);
-      border-radius: 6px;
-      padding: 10px;
-      margin-bottom: 12px;
-    }
-
-    .paired-row {
-      display: flex;
-      justify-content: space-between;
-      margin-bottom: 6px;
-      font-size: 12px;
-    }
-
-    .paired-row:last-child {
-      margin-bottom: 0;
-    }
-
-    .paired-label {
-      color: var(--text-muted);
-    }
-
-    .paired-val {
-      font-weight: 500;
-      color: var(--text);
-    }
-
-    .hidden {
-      display: none !important;
-    }
   </style>
 </head>
 <body>
@@ -209,36 +167,12 @@
     </div>
   </header>
 
-  <!-- Section 1: Before pairing -->
-  <div id="unpairedView">
-    <div class="form-group">
-      <label for="serverUrl">Gateway Server URL</label>
-      <input type="text" id="serverUrl" placeholder="http://127.0.0.1:8765" spellcheck="false">
-    </div>
-
-    <div class="form-group">
-      <label for="pairingCode">Pairing Code</label>
-      <input type="text" id="pairingCode" placeholder="PAIR-XXXX-YYYY" autocomplete="off" spellcheck="false" style="text-transform: uppercase;">
-    </div>
-
-    <button id="pairBtn">Pair Device</button>
+  <div class="form-group">
+    <label for="serverUrl">Gateway Server URL</label>
+    <input type="text" id="serverUrl" placeholder="http://127.0.0.1:8765" spellcheck="false">
   </div>
 
-  <!-- Section 2: After pairing -->
-  <div id="pairedView" class="hidden">
-    <div class="paired-info">
-      <div class="paired-row">
-        <span class="paired-label">Server:</span>
-        <span id="pairedServer" class="paired-val">http://127.0.0.1:8765</span>
-      </div>
-      <div class="paired-row">
-        <span class="paired-label">Paired User:</span>
-        <span id="pairedUser" class="paired-val">-</span>
-      </div>
-    </div>
-
-    <button id="unpairBtn" class="danger">Unpair Device</button>
-  </div>
+  <button id="toggleBtn">Connect</button>
 
   <div class="info-box">
     Ensure you are logged into <strong>gemini.google.com</strong> in this browser. Prompts execute inside silent background Temporary Chats.
@@ -247,10 +181,6 @@
   <div class="stats">
     <span>Tasks Completed: <strong id="taskCount" style="color: var(--text)">0</strong></span>
     <span id="activeSessionInfo">No active session</span>
-  </div>
-
-  <div style="margin-top: 10px; text-align: center; font-size: 10px; color: var(--text-muted);">
-    Research tool. Not affiliated with Google LLC.
   </div>
 
   <script src="popup.js"></script>

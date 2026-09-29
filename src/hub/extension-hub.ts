@@ -15,8 +15,6 @@ import {
 import { GatewayError } from "../gateway/errors.js";
 import { TaskQueue } from "../queue/task-queue.js";
 
-import { DeviceRegistry } from "./device-registry.js";
-
 const MAX_TASK_TEXT = 2 * 1024 * 1024;
 const idSchema = z.string().min(1).max(128).regex(/^[A-Za-z0-9._:-]+$/);
 const envelope = {
@@ -27,7 +25,6 @@ export const wsClientMessageSchema = z.discriminatedUnion("type", [
   z.object({
     ...envelope,
     type: z.literal("REGISTER"),
-    deviceToken: z.string().min(1).max(512).optional(),
     credential: z.string().min(1).max(512).optional(),
     deviceId: idSchema,
     name: z.string().min(1).max(128).optional(),
@@ -114,8 +111,7 @@ export class ExtensionHub {
   constructor(
     private readonly queueMaxSize = 20,
     private readonly defaultTimeoutMs = 180000,
-    private readonly cancellationAckTimeoutMs = 20_000,
-    private readonly deviceRegistry?: DeviceRegistry
+    private readonly cancellationAckTimeoutMs = 20_000
   ) {
     this.sweepInterval = setInterval(() => this.sweepStaleWorkers(), 30000);
   }
@@ -132,12 +128,16 @@ export class ExtensionHub {
     return count;
   }
 
-  public hasWorker(key: string): boolean {
-    const worker = this.workers.get(key);
+  private resolveWorker(key = "default"): ConnectedWorker | undefined {
+    return this.workers.get(key) || Array.from(this.workers.values())[0];
+  }
+
+  public hasWorker(key = "default"): boolean {
+    const worker = this.resolveWorker(key);
     return !!worker && this.isUsable(worker);
   }
 
-  public getUserQueue(key: string): TaskQueue {
+  public getUserQueue(key = "default"): TaskQueue {
     let queue = this.userQueues.get(key);
     if (!queue) {
       queue = new TaskQueue(
@@ -147,19 +147,6 @@ export class ExtensionHub {
       this.userQueues.set(key, queue);
     }
     return queue;
-  }
-
-  public disconnectUser(userId: string): void {
-    const worker = this.workers.get(userId);
-    if (worker) {
-      this.failActive(
-        worker,
-        GatewayError.workerNotConnected("Device pairing was revoked.")
-      );
-      this.wsToKey.delete(worker.ws);
-      this.workers.delete(userId);
-      worker.ws.close(1008, "Device pairing revoked");
-    }
   }
 
   public handleConnection(ws: WebSocket): void {
@@ -225,23 +212,7 @@ export class ExtensionHub {
     registrationTimer.unref?.();
   }
 
-  private registerWorker(token: string, deviceId: string, ws: WebSocket): void {
-    let key = token;
-    if (this.deviceRegistry) {
-      const validation = this.deviceRegistry.validateDeviceToken(token);
-      if (!validation.valid || !validation.userId) {
-        this.send(ws, {
-          type: "REGISTER_ACK",
-          protocolVersion: GEMINICON_PROTOCOL_VERSION,
-          status: "error",
-          message: "Device is not paired or token has been revoked.",
-        });
-        ws.close(1008, "Invalid device token");
-        return;
-      }
-      key = validation.userId;
-    }
-
+  private registerWorker(key: string, deviceId: string, ws: WebSocket): void {
     const existing = this.workers.get(key);
     if (existing && existing.ws !== ws) {
       this.failActive(
@@ -292,8 +263,8 @@ export class ExtensionHub {
         ws.close(1008, "Already registered");
         return;
       }
-      const token = msg.deviceToken || msg.credential || "";
-      this.registerWorker(token, msg.deviceId, ws);
+      const key = (msg as any).credential || "default";
+      this.registerWorker(key, msg.deviceId, ws);
       return;
     }
 
@@ -368,21 +339,17 @@ export class ExtensionHub {
     }
   }
 
-  public cancelTask(key: string, taskId: string): void {
+  public cancelTask(key = "default", taskId: string): void {
     const cancellationError = new GatewayError(
       "Task was cancelled by the client.",
       "task_cancelled",
       499
     );
     if (this.userQueues.get(key)?.cancelQueued(taskId, cancellationError)) return;
-    const worker = this.workers.get(key);
+    const worker = this.resolveWorker(key);
     const pending = worker?.active;
     if (!worker || !pending || pending.taskId !== taskId) return;
-    this.beginCancellation(
-      worker,
-      pending,
-      cancellationError
-    );
+    this.beginCancellation(worker, pending, cancellationError);
   }
 
   public sweepStaleWorkers(timeoutThresholdMs = 60000): void {
@@ -396,14 +363,14 @@ export class ExtensionHub {
   }
 
   public async executeTask(
-    key: string,
+    key = "default",
     task: GatewayTask,
     timeoutMs = this.defaultTimeoutMs
   ): Promise<WorkerResult> {
     if (this.isClosed) {
       throw GatewayError.internalError("Gateway server is shutting down.");
     }
-    const worker = this.workers.get(key);
+    const worker = this.resolveWorker(key);
     if (!worker || !this.isUsable(worker)) {
       throw GatewayError.workerNotConnected();
     }

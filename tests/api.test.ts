@@ -410,6 +410,13 @@ describe("API Endpoints", () => {
         lastHeartbeat: Date.now(),
         state: "connected_not_ready",
       });
+      (hub as any).workers.set("worker2", {
+        ws: { readyState: 1, close: vi.fn() },
+        key: "worker2",
+        connectedAt: Date.now(),
+        lastHeartbeat: Date.now(),
+        state: "connected_not_ready",
+      });
 
       await multiApp.register(registerChatCompletionsRoute(undefined, hub));
       const res = await multiApp.inject({

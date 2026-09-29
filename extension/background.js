@@ -69,12 +69,10 @@ async function connect() {
   if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
   const settings = await chrome.storage.local.get([
     "serverUrl",
-    "deviceToken",
     "desiredConnected",
   ]);
   if (settings.desiredConnected !== true) return;
-  const token = settings.deviceToken;
-  if (!settings.serverUrl || !token) {
+  if (!settings.serverUrl) {
     await chrome.storage.local.set({ connected: false, connecting: false });
     return;
   }
@@ -93,7 +91,6 @@ async function connect() {
     ws.onopen = async () => {
       const deviceId = await getDeviceId();
       send("REGISTER", {
-        deviceToken: token,
         deviceId,
         name: "Chrome Extension Worker",
         clientVersion: chrome.runtime.getManifest().version,

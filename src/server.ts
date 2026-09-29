@@ -6,9 +6,7 @@ import { BrowserManager } from "./providers/gemini-web/browser-manager.js";
 import { GeminiWorker } from "./providers/gemini-web/gemini-worker.js";
 import { TaskQueue } from "./queue/task-queue.js";
 import { ExtensionHub } from "./hub/extension-hub.js";
-import { DeviceRegistry } from "./hub/device-registry.js";
 import { registerChatCompletionsRoute } from "./api/chat-completions.js";
-import { registerPairingRoutes } from "./api/pairing.js";
 import { registerModelsRoute } from "./api/models.js";
 import { registerHealthRoute } from "./api/health.js";
 
@@ -21,7 +19,6 @@ export async function createServer(
   browserManager?: BrowserManager;
   taskQueue?: TaskQueue;
   extensionHub: ExtensionHub;
-  deviceRegistry: DeviceRegistry;
 }> {
   const app = Fastify({
     logger: {
@@ -83,15 +80,10 @@ export async function createServer(
     });
   });
 
-  // Initialize Device Registry
-  const deviceRegistry = new DeviceRegistry(runtimeConfig.devicesPath);
-
   // Initialize Extension Hub
   const extensionHub = new ExtensionHub(
     runtimeConfig.queueMaxSize,
-    runtimeConfig.generationTimeoutMs,
-    20_000,
-    deviceRegistry
+    runtimeConfig.generationTimeoutMs
   );
 
   // Initialize Local Browser & Queue ONLY if running in 'local' mode
@@ -127,15 +119,12 @@ export async function createServer(
   // Register API Routes
   const activeHub = runtimeConfig.mode === "hub" ? extensionHub : undefined;
   await app.register(
-    registerPairingRoutes(deviceRegistry, runtimeConfig.serviceKey, activeHub)
-  );
-  await app.register(
-    registerChatCompletionsRoute(taskQueue, activeHub, runtimeConfig.serviceKey)
+    registerChatCompletionsRoute(taskQueue, activeHub)
   );
   await app.register(registerModelsRoute);
   await app.register(registerHealthRoute(browserManager, activeHub));
 
-  return { app, browserManager, taskQueue, extensionHub, deviceRegistry };
+  return { app, browserManager, taskQueue, extensionHub };
 }
 
 async function main() {
@@ -185,14 +174,14 @@ async function main() {
     }
 
     console.log(`\n==================================`);
-    console.log(`geminicon (Multi-User Hub & Gateway)`);
+    console.log(`geminicon (OpenAI Gateway for Gemini Web)`);
     console.log(`==================================`);
     console.log(`Mode:       ${config.mode.toUpperCase()}`);
-    const apiUrl = config.publicUrl || `http://${config.host}:${config.port}`;
-    console.log(`HTTP API:   ${apiUrl}`);
+    const apiUrl = `http://${config.host}:${config.port}`;
+    console.log(`HTTP API:   ${apiUrl}/v1/chat/completions`);
     if (config.mode === "hub") {
       const websocketUrl = apiUrl.replace(/^http/, "ws");
-      console.log(`WebSocket:  ${websocketUrl.replace(/\/$/, "")}/ws`);
+      console.log(`WebSocket:  ${websocketUrl}/ws`);
     }
     console.log(`Local Env:  ${browserStatus} (Gemini: ${geminiStatus})`);
     if (config.mode === "local") {

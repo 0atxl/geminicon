@@ -106,7 +106,6 @@ describe("extension background lifecycle", () => {
   it("does not reconnect after an explicit disconnect survives a service-worker restart", async () => {
     const state = await loadBackground({
       serverUrl: "http://127.0.0.1:8765",
-      deviceToken: "gcon_dev_0000000000000000000000000000000000000000000000000000000000000001",
       desiredConnected: false,
     });
     await Promise.resolve();

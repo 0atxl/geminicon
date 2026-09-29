@@ -50,50 +50,48 @@ const sessionIdSchema = z.string().min(1).max(128).regex(/^[A-Za-z0-9._:-]+$/);
 
 export const registerChatCompletionsRoute = (
   localTaskQueue?: TaskQueue,
-  extensionHub?: ExtensionHub,
-  serviceKey?: string
+  extensionHub?: ExtensionHub
 ): FastifyPluginAsync => {
   return async (fastify) => {
     fastify.post("/v1/chat/completions", async (request, reply) => {
       const startTime = Date.now();
       const requestId = `req_${crypto.randomBytes(6).toString("hex")}`;
 
-      // 1. Explicitly check for unsupported features in request body
-      const rawBody = (request.body as Record<string, any>) || {};
-      if (rawBody.tools || rawBody.functions || rawBody.tool_choice) {
-        throw GatewayError.unsupportedFeature(
-          "Function and tool calling are not supported in V1.",
-          "tools_not_supported"
+      // 1. Validate payload schema
+      const parseResult = chatCompletionSchema.safeParse(request.body);
+      if (!parseResult.success) {
+        throw GatewayError.invalidRequest(
+          parseResult.error.issues[0]?.message || "Invalid request payload."
         );
       }
 
-      if (rawBody.n && typeof rawBody.n === "number" && rawBody.n > 1) {
+      const body = parseResult.data;
+      const rawBody = (request.body as Record<string, any>) || {};
+
+      // 2. Reject unsupported OpenAI features
+      if (rawBody.tools || rawBody.functions) {
+        throw GatewayError.unsupportedFeature(
+          "Tools and function calling are not supported in V1.",
+          "tools_not_supported"
+        );
+      }
+      if (body.n !== undefined && body.n > 1) {
         throw GatewayError.unsupportedFeature(
           "Parameter 'n' > 1 is not supported in V1.",
           "unsupported_parameter"
         );
       }
 
-      // 2. Validate request body against schema
-      const parseResult = chatCompletionSchema.safeParse(request.body);
-      if (!parseResult.success) {
-        const firstIssue = parseResult.error.issues[0];
-        throw GatewayError.invalidRequest(
-          firstIssue?.message || "Invalid request payload."
-        );
-      }
-
-      const body = parseResult.data;
-
-      // 3. Accept only models whose selection is positively verifiable.
-      if (!isSupportedModel(body.model)) {
+      // 3. Validate requested model
+      const validatedModel = body.model;
+      if (!isSupportedModel(validatedModel)) {
         throw GatewayError.unsupportedModel(
           body.model,
           SUPPORTED_MODELS.join(", ")
         );
       }
 
-      // 4. Validate stream option (must explicitly reject with streaming_not_supported)
+      // 4. Validate stream option (streaming not supported in V1)
       if (body.stream === true) {
         throw GatewayError.unsupportedFeature(
           "Streaming is not supported in V1.",
@@ -101,43 +99,22 @@ export const registerChatCompletionsRoute = (
         );
       }
 
-      // 5. Authentication & Service Key Validation
+      // 5. Extract optional user / worker routing key
       const authHeader = request.headers["authorization"];
       let bearerToken: string | undefined;
       if (authHeader && authHeader.startsWith("Bearer ")) {
         bearerToken = authHeader.slice(7).trim();
       }
-
-      // The device token must NOT authorize generation API calls
-      if (bearerToken && bearerToken.startsWith("gcon_dev_")) {
-        throw GatewayError.unauthorized(
-          "Device tokens cannot authorize generation API calls. A service key is required.",
-          "device_token_not_allowed"
-        );
-      }
-
-      // Validate service key if configured
-      if (serviceKey) {
-        if (!bearerToken || bearerToken !== serviceKey) {
-          throw GatewayError.unauthorized(
-            "Unauthorized: Valid service key required."
-          );
-        }
-      }
-
-      // 6. Extract User ID for routing
       const userHeader =
         request.headers["x-geminicon-user-id"] ||
         request.headers["x-user-id"] ||
         request.headers["x-pairing-key"];
       let targetUserId = userHeader ? String(userHeader).trim() : undefined;
-
-      // Backward compatibility: if no serviceKey configured and a non-dummy bearer token is passed
-      if (!targetUserId && bearerToken && !serviceKey && bearerToken !== "local" && bearerToken !== "none") {
+      if (!targetUserId && bearerToken && bearerToken !== "local" && bearerToken !== "none") {
         targetUserId = bearerToken;
       }
 
-      // 7. Extract session options
+      // 6. Extract session options
       const sessionCandidate =
         request.headers["x-session-id"] || rawBody.session_id;
       const parsedSession = sessionCandidate === undefined
@@ -152,7 +129,7 @@ export const registerChatCompletionsRoute = (
         request.headers["x-reset-session"] === "true" ||
         rawBody.reset_session === true;
 
-      // 8. Determine target execution queue
+      // 7. Determine target execution queue
       let targetQueue: TaskQueue | undefined;
 
       if (localTaskQueue) {
@@ -162,10 +139,15 @@ export const registerChatCompletionsRoute = (
           throw GatewayError.workerNotConnected();
         }
         targetQueue = extensionHub.getUserQueue(targetUserId);
-      } else if (extensionHub && extensionHub.getConnectedWorkerCount() > 0) {
+      } else if (extensionHub && extensionHub.getConnectedWorkerCount() > 1) {
         throw GatewayError.invalidRequest(
-          "Multiple users configured. Please provide 'X-Geminicon-User-ID: <userId>'."
+          "Multiple users configured. Please specify target worker."
         );
+      } else if (extensionHub) {
+        if (!extensionHub.hasWorker()) {
+          throw GatewayError.workerNotConnected();
+        }
+        targetQueue = extensionHub.getUserQueue("default");
       } else {
         throw GatewayError.workerNotConnected(
           "No local browser or extension worker is connected to process requests."
@@ -180,30 +162,23 @@ export const registerChatCompletionsRoute = (
         throw GatewayError.invalidRequest("Normalized prompt is too large.");
       }
 
-      // 9. Create internal task
+      // 9. Create GatewayTask
       const task: GatewayTask = {
         id: requestId,
-        model: body.model,
+        model: validatedModel,
         prompt,
-        createdAt: startTime,
         sessionId,
         resetSession,
+        createdAt: Date.now(),
       };
 
-      if (config.logContent) {
-        fastify.log.info(
-          { requestId, prompt },
-          "Submitting prompt to queue"
-        );
-      } else {
-        fastify.log.info({ requestId }, "Request queued");
-      }
+      request.log.info({ requestId }, "Request queued");
 
-      // Fastify's signal is aborted only for an actual client disconnect. A
-      // normal IncomingMessage 'close' also fires after successful requests.
+      // 10. Attach cancellation handler for client disconnect
+      const routingKey = targetUserId || "default";
       const onRequestAbort = () => {
-        if (targetUserId && extensionHub) {
-          extensionHub.cancelTask(targetUserId, requestId);
+        if (extensionHub) {
+          extensionHub.cancelTask(routingKey, requestId);
         }
         if (localTaskQueue) {
           localTaskQueue.cancelQueued(
@@ -214,32 +189,24 @@ export const registerChatCompletionsRoute = (
       };
       request.signal.addEventListener("abort", onRequestAbort, { once: true });
 
-      // 10. Enqueue task for sequential execution in user's queue
-      let workerResult;
+      // 11. Enqueue and await response
+      let result;
       try {
-        workerResult = await targetQueue.enqueue(task);
+        result = await targetQueue.enqueue(task);
       } finally {
         request.signal.removeEventListener("abort", onRequestAbort);
       }
 
-      if (config.logContent) {
-        fastify.log.info(
-          {
-            requestId,
-            latencyMs: workerResult.latencyMs,
-            response: workerResult.text,
-          },
-          "Generation completed"
-        );
-      } else {
-        fastify.log.info(
-          { requestId, latencyMs: workerResult.latencyMs },
-          "Generation completed"
-        );
-      }
+      request.log.info(
+        { requestId, latencyMs: result.latencyMs },
+        "Generation completed"
+      );
 
-      // 11. Format OpenAI-compatible response
-      const response = ResponseNormalizer.normalize(workerResult, task.model);
+      // 12. Normalize response to OpenAI format
+      const response = ResponseNormalizer.normalize(
+        result,
+        validatedModel
+      );
 
       return reply.code(200).send(response);
     });

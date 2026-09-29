@@ -46,7 +46,6 @@ function registerReady(hub: ExtensionHub, socket = mockSocket()) {
   hub.handleConnection(socket.ws);
   socket.receive(clientMessage({
     type: "REGISTER",
-    credential,
     deviceId: "device-1",
     clientVersion: "1.0.0",
   }));
@@ -84,7 +83,6 @@ describe("ExtensionHub fail-closed transport", () => {
     hub.handleConnection(socket.ws);
     socket.receive(clientMessage({
       type: "REGISTER",
-      credential,
       deviceId: "device-1",
       clientVersion: "1.0.0",
     }));
@@ -225,7 +223,7 @@ describe("ExtensionHub fail-closed transport", () => {
 
   it("does not reflect extension-supplied credential text in task errors", async () => {
     const socket = registerReady(hub);
-    const pending = hub.executeTask(credential, task("safe-error"));
+    const pending = hub.executeTask("default", task("safe-error"));
     const execute = socket.sent.find((message) => message.type === "EXECUTE_TASK");
     socket.receive(clientMessage({
       type: "TASK_ERROR",
