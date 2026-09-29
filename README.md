@@ -6,22 +6,45 @@ No API keys, no billing, no credit card required—prompts run inside a silent, 
 
 ---
 
-## ⚡ Quickstart (1 Minute)
+## ⚡ Quickstart
 
-### 1. Install & Build
-```bash
-npm install
-npm run build
-npm start
-```
-The gateway is now running at `http://127.0.0.1:8765`.
+### Option A: With Chrome Extension (Recommended & Easiest)
+> Uses your existing Chrome browser where you are already signed into your Google account. Zero CAPTCHAs, zero login walls.
 
-### 2. Connect Your Chrome Extension
-1. Open Google Chrome $\rightarrow$ go to `chrome://extensions/`.
-2. Enable **Developer mode** (top-right toggle).
-3. Click **Load unpacked** $\rightarrow$ select the `extension/` folder in this repo.
-4. Click the **Geminicon** extension icon in your toolbar $\rightarrow$ click **Connect**.
-5. When it turns green (**Connected & Ready**), you're all set!
+1. **Start the Gateway:**
+   ```bash
+   npm install
+   npm run build
+   npm start
+   ```
+   *(Running at `http://127.0.0.1:8765`)*
+
+2. **Connect the Chrome Extension:**
+   - Open Chrome $\to$ go to `chrome://extensions/`.
+   - Enable **Developer mode** (top-right toggle).
+   - Click **Load unpacked** $\to$ select the `extension/` folder in this repo.
+   - Click the **Geminicon** icon in your Chrome toolbar $\to$ click **Connect**.
+   - When the badge turns green (**Connected & Ready**), you're all set!
+
+---
+
+### Option B: Without Extension (Standalone Playwright Chromium)
+> Runs an automated browser in the background. Good for headless servers or when you don't want Chrome open.
+
+1. **First-Time Google Sign-in:**
+   In `.env`, set:
+   ```ini
+   GEMINICON_MODE=local
+   HEADLESS=false
+   ```
+2. **Start Gateway and Sign In Once:**
+   ```bash
+   npm start
+   ```
+   A browser window will open. Sign into your Google account at [gemini.google.com](https://gemini.google.com/). Once logged in, stop the server (`Ctrl+C`). Your session is saved in `./browser-data/profile`.
+
+3. **Run Headless:**
+   Set `HEADLESS=true` in `.env` and run `npm start`. All requests will route through the headless browser without needing Chrome or the extension.
 
 ---
 
@@ -115,6 +138,25 @@ Optional settings (defaults work out of the box for personal use):
 
 * [Architecture & Operating Modes](docs/ARCHITECTURE.md)
 * [Full API Reference & Error Codes](docs/API.md)
+
+---
+
+## ❓ Troubleshooting
+
+| Error | Cause | Fix |
+| :--- | :--- | :--- |
+| `worker_not_connected` | Gateway is in `hub` mode but extension is not connected yet. | Open extension popup and click **Connect** (badge turns green), or switch to `GEMINICON_MODE=local`. |
+| `authentication_required` | Google Gemini session expired. | Open [gemini.google.com](https://gemini.google.com/) in Chrome (hub mode) or run with `HEADLESS=false` (local mode) and sign in. |
+| `temporary_chat_unavailable` | Extension could not find Temporary Chat. | Ensure you are on desktop view and not on a Google Workspace account with temporary chat disabled. |
+
+---
+
+## 👥 Multi-User & Team Deployments
+
+Need a shared server where team members pair their own devices using single-use pairing codes and Service Key authentication? Switch to the **`team-hub`** branch:
+```bash
+git checkout team-hub
+```
 
 ---
 
