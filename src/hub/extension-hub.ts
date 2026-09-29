@@ -25,7 +25,6 @@ export const wsClientMessageSchema = z.discriminatedUnion("type", [
   z.object({
     ...envelope,
     type: z.literal("REGISTER"),
-    credential: z.string().min(1).max(512).optional(),
     deviceId: idSchema,
     name: z.string().min(1).max(128).optional(),
     clientVersion: z.string().min(1).max(32),
@@ -263,8 +262,7 @@ export class ExtensionHub {
         ws.close(1008, "Already registered");
         return;
       }
-      const key = (msg as any).credential || "default";
-      this.registerWorker(key, msg.deviceId, ws);
+      this.registerWorker("default", msg.deviceId, ws);
       return;
     }
 

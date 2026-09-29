@@ -30,4 +30,19 @@ describe("mode configuration", () => {
     await app.close();
     await extensionHub.close();
   });
+
+  it("rejects non-loopback host without GEMINICON_ALLOW_PUBLIC_LOCAL", () => {
+    expect(() =>
+      loadConfig({ HOST: "0.0.0.0" }, "/tmp/geminicon-test")
+    ).toThrow(/Refusing to start/);
+  });
+
+  it("allows non-loopback host when GEMINICON_ALLOW_PUBLIC_LOCAL=true", () => {
+    const value = loadConfig(
+      { HOST: "0.0.0.0", GEMINICON_ALLOW_PUBLIC_LOCAL: "true" },
+      "/tmp/geminicon-test"
+    );
+    expect(value.host).toBe("0.0.0.0");
+    expect(value.allowPublicLocal).toBe(true);
+  });
 });

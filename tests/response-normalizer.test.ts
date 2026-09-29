@@ -9,7 +9,11 @@ describe("ResponseNormalizer", () => {
       latencyMs: 1250,
     };
 
-    const response = ResponseNormalizer.normalize(workerResult, "gemini-web");
+    const response = ResponseNormalizer.normalize(
+      workerResult,
+      "gemini-web",
+      "Explain TCP congestion control"
+    );
 
     expect(response).toEqual({
       id: "chatcmpl-req_01JXYZ",
@@ -26,6 +30,11 @@ describe("ResponseNormalizer", () => {
           finish_reason: "stop",
         },
       ],
+      usage: {
+        prompt_tokens: 8,
+        completion_tokens: 19,
+        total_tokens: 27,
+      },
     });
     expect(response.created).toBeGreaterThan(1700000000);
   });

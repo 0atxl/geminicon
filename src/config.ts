@@ -13,6 +13,11 @@ export interface GatewayConfig {
   queueMaxSize: number;
   logLevel: string;
   logContent: boolean;
+  allowPublicLocal: boolean;
+}
+
+export function isLoopbackHost(host: string): boolean {
+  return host === "127.0.0.1" || host === "::1" || host === "localhost";
 }
 
 export function loadConfig(
@@ -24,9 +29,18 @@ export function loadConfig(
     throw new Error("GEMINICON_MODE must be either 'local' or 'hub'.");
   }
 
+  const host = env.HOST || "127.0.0.1";
+  const allowPublicLocal = env.GEMINICON_ALLOW_PUBLIC_LOCAL === "true";
+
+  if (!isLoopbackHost(host) && !allowPublicLocal) {
+    throw new Error(
+      "Refusing to start: Minimal gateway has no authentication and cannot bind to a public/non-loopback host without GEMINICON_ALLOW_PUBLIC_LOCAL=true."
+    );
+  }
+
   return {
     mode: rawMode,
-    host: env.HOST || "127.0.0.1",
+    host,
     port: parseInt(env.PORT || "8765", 10),
     headless: env.HEADLESS !== "false",
     browserProfilePath:
@@ -35,6 +49,7 @@ export function loadConfig(
     queueMaxSize: parseInt(env.QUEUE_MAX_SIZE || "20", 10),
     logLevel: env.LOG_LEVEL || "info",
     logContent: env.LOG_CONTENT === "true",
+    allowPublicLocal,
   };
 }
 

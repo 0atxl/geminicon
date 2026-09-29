@@ -205,9 +205,11 @@ export const registerChatCompletionsRoute = (
       // 12. Normalize response to OpenAI format
       const response = ResponseNormalizer.normalize(
         result,
-        validatedModel
+        validatedModel,
+        prompt
       );
 
+      reply.header("X-Generation-Time-Ms", result.latencyMs);
       return reply.code(200).send(response);
     });
   };

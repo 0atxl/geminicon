@@ -397,12 +397,6 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     disconnect().then(() => sendResponse({ status: "ok" }));
     return true;
   }
-  if (message.action === "UNPAIR") {
-    chrome.storage.local.set({ desiredConnected: false })
-      .then(disconnect)
-      .then(() => sendResponse({ status: "ok" }));
-    return true;
-  }
 });
 
 chrome.runtime.onStartup.addListener(() => {

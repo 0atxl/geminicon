@@ -9,6 +9,7 @@ const SELECTORS = {
     'textarea[placeholder*="Ask Gemini"]',
     'div.ql-editor',
     'rich-textarea p',
+    'textarea',
   ].join(", "),
 
   sendButton: [
@@ -16,12 +17,14 @@ const SELECTORS = {
     'button[aria-label="Send prompt"]',
     'button[aria-label="Submit"]',
     'button.send-button',
+    'button[aria-label*="Send"]',
   ].join(", "),
 
   temporaryChatButton: [
     'button[aria-label="Temporary chat"]',
     'button[aria-label="Temporary chat" i]',
     '[role="button"][aria-label="Temporary chat" i]',
+    'button[data-test-id="temporary-chat-button"]',
   ].join(", "),
 
   temporaryChatActiveIndicator: [
@@ -31,6 +34,8 @@ const SELECTORS = {
     'button[aria-label*="Exit temporary" i]',
     '[data-test-id="temporary-chat-indicator"]',
     '[data-test-id="temporary-chat-active"]',
+    '[aria-label*="temporary chat is on" i]',
+    '[aria-label*="temporary chat is active" i]',
   ].join(", "),
 
   menuButton: [
@@ -43,6 +48,7 @@ const SELECTORS = {
     'button[aria-label="Stop response"]',
     'button[aria-label="Stop generating"]',
     'button[aria-label="Stop"]',
+    'button[aria-label*="Stop"]',
   ].join(", "),
 
   responseContainer: [
@@ -51,8 +57,8 @@ const SELECTORS = {
     ".model-response-text",
     ".response-container-content",
     "div.markdown",
+    "[class*='response-content']",
   ].join(", "),
-
 };
 
 function sleep(ms) {
@@ -223,9 +229,9 @@ async function waitForCompletion(task, initialResponseCount, timeoutMs = 180000)
   const startTime = Date.now();
   let previousText = "";
   let stableCount = 0;
-  const requiredStability = 3;
+  const requiredStability = 2;
 
-  await sleep(1000);
+  await sleep(300);
 
   while (Date.now() - startTime < timeoutMs) {
     assertNotCancelled(task);
@@ -267,7 +273,7 @@ async function waitForCompletion(task, initialResponseCount, timeoutMs = 180000)
       }
     }
 
-    await sleep(500);
+    await sleep(250);
   }
 
   throw new Error("Generation timed out on Gemini Web.");
