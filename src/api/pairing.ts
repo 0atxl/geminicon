@@ -1,8 +1,17 @@
+import crypto from "crypto";
 import { FastifyPluginAsync } from "fastify";
 import { z } from "zod";
 import { DeviceRegistry } from "../hub/device-registry.js";
 import { ExtensionHub } from "../hub/extension-hub.js";
 import { GatewayError } from "../gateway/errors.js";
+
+function timingSafeEqualStr(a?: string, b?: string): boolean {
+  if (!a || !b) return false;
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
 
 const createCodeSchema = z.object({
   userId: z.string({ required_error: "Missing required field 'userId'." }).min(1, "userId must not be empty.").max(128),
@@ -33,7 +42,7 @@ export const registerPairingRoutes = (
         );
       }
       const token = authHeader.slice(7).trim();
-      if (token !== serviceKey) {
+      if (!timingSafeEqualStr(token, serviceKey)) {
         throw GatewayError.unauthorized("Invalid service key.");
       }
     };

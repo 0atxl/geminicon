@@ -51,8 +51,8 @@ export class TaskQueue {
       item.reject(err);
     } finally {
       this.active = false;
-      // Process next item in FIFO order
-      this.processNext();
+      // Process next item in FIFO order asynchronously to prevent call stack growth
+      queueMicrotask(() => this.processNext());
     }
   }
 
@@ -78,6 +78,5 @@ export class TaskQueue {
       const item = this.queue.shift();
       item?.reject(error);
     }
-    this.active = false;
   }
 }

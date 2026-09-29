@@ -48,6 +48,14 @@ const chatCompletionSchema = z.object({
 
 const sessionIdSchema = z.string().min(1).max(128).regex(/^[A-Za-z0-9._:-]+$/);
 
+function timingSafeEqualStr(a?: string, b?: string): boolean {
+  if (!a || !b) return false;
+  const bufA = Buffer.from(a);
+  const bufB = Buffer.from(b);
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
 export const registerChatCompletionsRoute = (
   localTaskQueue?: TaskQueue,
   extensionHub?: ExtensionHub,
@@ -118,7 +126,7 @@ export const registerChatCompletionsRoute = (
 
       // Validate service key if configured
       if (serviceKey) {
-        if (!bearerToken || bearerToken !== serviceKey) {
+        if (!bearerToken || !timingSafeEqualStr(bearerToken, serviceKey)) {
           throw GatewayError.unauthorized(
             "Unauthorized: Valid service key required."
           );
@@ -239,8 +247,13 @@ export const registerChatCompletionsRoute = (
       }
 
       // 11. Format OpenAI-compatible response
-      const response = ResponseNormalizer.normalize(workerResult, task.model);
+      const response = ResponseNormalizer.normalize(
+        workerResult,
+        task.model,
+        prompt
+      );
 
+      reply.header("X-Generation-Time-Ms", workerResult.latencyMs);
       return reply.code(200).send(response);
     });
   };

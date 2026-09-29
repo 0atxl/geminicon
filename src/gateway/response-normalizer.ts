@@ -6,8 +6,13 @@ export class ResponseNormalizer {
    */
   public static normalize(
     result: WorkerResult,
-    model: SupportedModel = "gemini-web"
+    model: SupportedModel = "gemini-web",
+    prompt?: string
   ): OpenAIChatResponse {
+    const promptTokens = prompt ? Math.max(1, Math.ceil(prompt.length / 4)) : 0;
+    const completionTokens =
+      result.text.length > 0 ? Math.max(1, Math.ceil(result.text.length / 4)) : 0;
+
     return {
       id: `chatcmpl-${result.requestId}`,
       object: "chat.completion",
@@ -23,6 +28,11 @@ export class ResponseNormalizer {
           finish_reason: "stop",
         },
       ],
+      usage: {
+        prompt_tokens: promptTokens,
+        completion_tokens: completionTokens,
+        total_tokens: promptTokens + completionTokens,
+      },
     };
   }
 }
